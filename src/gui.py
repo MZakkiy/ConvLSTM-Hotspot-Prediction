@@ -1,4 +1,3 @@
-import sys
 import os
 
 import numpy as np
@@ -19,6 +18,10 @@ from sklearn.model_selection import train_test_split
 
 from .data_handler import FireDataGenerator, siapkan_data_mentah
 from .workers import TrainingWorker, EvaluasiWorker
+
+from tensorflow.keras.models import load_model
+from src.ml_core import weighted_binary_crossentropy, SliceSequence
+
 
 # Import jembatan penghubung Matplotlib dan PySide
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -73,7 +76,7 @@ class MainWindow(QMainWindow):
             },
             "Kalimantan": {
                 "extent": [108.0, 120.0, -5.0, 5.0], 
-                "shp_batas": "shapefiles/batas_kalimantan.shp" # Asumsi nama file Anda
+                "shp_batas": "shapefiles/batas_kalimantan.shp" 
             }
         }
         
@@ -96,7 +99,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main_widget)
         main_layout = QVBoxLayout(main_widget)
 
-        # 1. BUAT TABS (Sesuai gambar: Data Preparation, Build ML Model, Fire Index)
+        # 1. BUAT TABS UTAMA
         self.tabs = QTabWidget()
         self.tab_data_prep = QWidget()
         self.tabs.addTab(self.tab_data_prep, "Data Preparation")
@@ -122,7 +125,7 @@ class MainWindow(QMainWindow):
         
         # Tombol Import
         self.btn_import = QPushButton("Import Data")
-        self.btn_import.clicked.connect(self.import_data) # <--- Sambungkan tombol ke fungsi import
+        self.btn_import.clicked.connect(self.import_data) 
         
         vbox_input.addWidget(QLabel("Select Region:"))
         vbox_input.addWidget(self.combo_region)
@@ -133,7 +136,7 @@ class MainWindow(QMainWindow):
         group_input.setLayout(vbox_input)
                
         top_control_layout.addWidget(group_input)
-        top_control_layout.addStretch() # Dorong ke atas agar rapi
+        top_control_layout.addStretch() 
 
         # 3. BUAT AREA MAIN PLOT (PETA SPASIAL)
         group_plot = QGroupBox("Main Plot (Spatial Map)")
@@ -219,10 +222,7 @@ class MainWindow(QMainWindow):
         plot_layout.addLayout(slider_layout)
         group_plot.setLayout(plot_layout)
         
-        # main_layout.addWidget(self.combo_variable) # Dummy dropdown layout
-        # main_layout.addWidget(group_plot, stretch=1)
         tab1_layout.addLayout(top_control_layout)
-        # tab1_layout.addWidget(self.combo_variable) # Pindahkan dropdown ke dalam panel kontrol atas
         tab1_layout.addWidget(group_plot, stretch=1)
 
         # Tampilkan peta awal saat aplikasi dibuka
@@ -316,11 +316,10 @@ class MainWindow(QMainWindow):
         
         form_eval.addRow("ROC-AUC:", self.label_val_auc)
 
-        # --- 🛠️ TAMBAHKAN SPINBOX THRESHOLD BARU DI SINI ---
         self.spin_eval_threshold = QDoubleSpinBox()
         self.spin_eval_threshold.setRange(0.01, 0.99)
         self.spin_eval_threshold.setSingleStep(0.05)
-        self.spin_eval_threshold.setValue(0.30) # Nilai default 30%
+        self.spin_eval_threshold.setValue(0.50)
         self.spin_eval_threshold.setToolTip("The probability threshold for recognizing a hot spot during evaluation. Adjusting this can affect precision and recall metrics.")
         
         form_eval.addRow("Eval Threshold:", self.spin_eval_threshold) # Masukkan ke layout evaluasi
@@ -346,20 +345,21 @@ class MainWindow(QMainWindow):
         panel_kiri_ml.addWidget(group_eval)
         
         # --- TOMBOL MULAI & PROGRESS ---
-        # (Gunakan kode tombol btn_train dan progress_bar Anda yang lama di sini)
-        # self.label_status_ml = QLabel("Status: Menunggu instruksi ... ") 
-        # self.label_status_ml.setStyleSheet("color: #ff9800; font-weight: bold;")
-
         self.progress_bar = QProgressBar() 
         self.progress_bar.setValue(0)
 
         self.btn_train = QPushButton("Start Training") 
         self.btn_train.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; font-size: 14px; padding: 10px; border-radius: 5px;") 
-        self.btn_train.clicked.connect(self.mulai_training) # Sambungkan ke fungsi panel_kiri.addWidget(self.btn_train)
-        
+        self.btn_train.clicked.connect(self.mulai_training) 
+
+        self.btn_simpan_model = QPushButton("Save Model")
+        self.btn_simpan_model.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; font-size: 14px; padding: 10px; border-radius: 5px;")
+        self.btn_simpan_model.setEnabled(False) # Matikan tombol sebelum ada model yang dilatih
+        self.btn_simpan_model.clicked.connect(self.simpan_model)
+
         panel_kiri_ml.addWidget(self.btn_train)
+        panel_kiri_ml.addWidget(self.btn_simpan_model)
         panel_kiri_ml.addWidget(self.progress_bar)
-        # panel_kiri_ml.addWidget(self.label_status_ml)
         panel_kiri_ml.addStretch()
         
         # --- PANEL KANAN: GRAFIK REAL-TIME ---
@@ -395,6 +395,11 @@ class MainWindow(QMainWindow):
         panel_kiri_fire = QVBoxLayout()
         group_kontrol_fire = QGroupBox("Control Panel")
         layout_kontrol = QVBoxLayout()
+
+        self.btn_muat_model = QPushButton("Load Pre-trained Model")
+        self.btn_muat_model.setStyleSheet("background-color: #3498db; color: white; font-weight: bold; margin-bottom: 10px; padding: 10px;")
+        self.btn_muat_model.clicked.connect(self.muat_model)
+        layout_kontrol.addWidget(self.btn_muat_model)
         
         self.btn_prediksi = QPushButton("Predict Fire Risk")
         self.btn_prediksi.setStyleSheet("background-color: #e67e22; color: white; font-weight: bold; font-size: 14px; padding: 15px; border-radius: 5px;")
@@ -410,19 +415,7 @@ class MainWindow(QMainWindow):
         self.slider_threshold.setDecimals(2)
         self.slider_threshold.valueChanged.connect(lambda: self.update_peta_prediksi(self.slider_hari.value()))
 
-        # Slider Threshold (Untuk menyaring prediksi yang kurang yakin)
-        # layout_kontrol.addWidget(QLabel("Model Confidence Threshold:"))
-        # self.slider_threshold = QSlider(Qt.Horizontal)
-        # self.slider_threshold.setMinimum(0)
-        # self.slider_threshold.setMaximum(100)
-        # self.slider_threshold.setValue(30) # Default 30% yakin
-        # layout_kontrol.addWidget(self.slider_threshold)
-        
-        # self.label_threshold = QLabel("Display areas with index > 0.30")
-        # self.slider_threshold.valueChanged.connect(lambda v: self.label_threshold.setText(f"Display areas with index > {v}"))
-
         self.form_prediksi.addRow("Confidence Threshold:", self.slider_threshold)
-        # self.form_prediksi.addRow("", self.label_threshold) # Kosongkan label kiri agar rapi
         layout_kontrol.addLayout(self.form_prediksi)
         
         group_kontrol_fire.setLayout(layout_kontrol)
@@ -488,7 +481,7 @@ class MainWindow(QMainWindow):
 
         self.slider_hari = QSlider(Qt.Horizontal)
         self.slider_hari.setMinimum(1)
-        self.slider_hari.setMaximum(1) # Akan di-update otomatis nanti
+        self.slider_hari.setMaximum(1) # Akan diupdate nanti setelah prediksi dijalankan
         self.slider_hari.setTickPosition(QSlider.TicksBelow)
         self.slider_hari.setTickInterval(1)
         self.slider_hari.setEnabled(False) # Matikan sebelum ada hasil prediksi
@@ -572,7 +565,6 @@ class MainWindow(QMainWindow):
 
                         # Ambil batas asli dari data (minx, miny, maxx, maxy)
                         bounds = ds.rio.bounds()
-                        # Matplotlib imshow membutuhkan format: [kiri, kanan, bawah, atas]
                         extent_asli = [bounds[0], bounds[2], bounds[1], bounds[3]]
 
                     except Exception as e:
@@ -915,6 +907,42 @@ class MainWindow(QMainWindow):
         self.fig_metrics.tight_layout()
         self.canvas_metrics.draw()
     
+    def simpan_model(self):
+        """Membuka dialog dan menyimpan model yang ada di RAM ke Hard Disk"""
+        
+        # Keamanan ganda: Pastikan model benar-benar ada di memori
+        if self.model_convlstm is None:
+            QMessageBox.warning(self, "Error", "No trained model found! Please train a model first before saving.")
+            return
+
+        # Buka jendela dialog agar user bisa memilih lokasi dan nama file
+        # Ekstensi default yang kita sarankan adalah .keras
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, 
+            "Save Trained Model", 
+            "model_prediksi_gambut.keras", # Nama file rekomendasi
+            "Keras Model (*.keras);;HDF5 Model (*.h5);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                # Proses menyimpan model
+                self.btn_simpan_model.setEnabled(False)
+                QApplication.processEvents() # Paksa UI update teks
+                
+                # Fungsi bawaan TensorFlow untuk menyimpan model utuh (Arsitektur + Bobot)
+                self.model_convlstm.save(file_path)
+                
+                QMessageBox.information(self, "Success", f"Model successfully saved to:\n{file_path}")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to save model:\n{str(e)}")
+                
+            finally:
+                # Kembalikan tampilan tombol
+                self.btn_simpan_model.setText("Save Model")
+                self.btn_simpan_model.setEnabled(True)
+    
     def jalankan_evaluasi_cepat(self):
         # Cek apakah model sudah pernah dilatih dan disimpan
         # 🌟 UBAH CEK FILE MENJADI CEK VARIABEL RAM
@@ -965,7 +993,52 @@ class MainWindow(QMainWindow):
         # Tangkap model dari worker jika pelatihannya berhasil (tidak error)
         if hasattr(self, 'worker') and hasattr(self.worker, 'model_hasil'):
             self.model_convlstm = self.worker.model_hasil
+
+            self.btn_simpan_model.setEnabled(True)
         # -------------------------
+    
+    def muat_model(self):
+        """Membuka dialog untuk memuat model dari penyimpanan lokal"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Select Trained Model File", 
+            "", 
+            "Keras Model (*.keras *.h5);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                self.btn_muat_model.setText("Loading Model...")
+                QApplication.processEvents()
+
+                self.model_convlstm = load_model(
+                    file_path, 
+                    custom_objects={
+                        'loss': weighted_binary_crossentropy(1.0, 200.0),
+                        'SliceSequence': SliceSequence 
+                    },
+                    compile=False,
+                    safe_mode=False
+                )
+
+                # Cek atribut model untuk menyesuaikan UI 
+                # Mencoba mendeteksi horizon dari layer Lambda jika memungkinkan
+                try:
+                    # Mencoba mengambil jumlah hari prediksi dari shape output model
+                    # Output shape: (None, Horizon, Tinggi, Lebar, 1)
+                    horizon_terdeteksi = self.model_convlstm.output_shape[1]
+                    self.slider_hari.setMaximum(horizon_terdeteksi)
+                except:
+                    pass
+
+                QMessageBox.information(self, "Success", f"Model loaded successfully!\nLocation: {file_path}")
+                self.btn_prediksi.setEnabled(True) # Aktifkan tombol prediksi
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to load model:\n{str(e)}")
+                
+            finally:
+                self.btn_muat_model.setText("Load Pre-trained Model")
     
     def jalankan_prediksi(self):
         # 1. VALIDASI
