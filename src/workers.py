@@ -4,7 +4,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import ConvLSTM2D, BatchNormalization, Dropout, Conv2D, Lambda, TimeDistributed
 from tensorflow.keras.callbacks import Callback
 
-from .ml_core import weighted_binary_crossentropy, buat_metrik_spasial
+from .ml_core import weighted_binary_crossentropy, buat_metrik_spasial, SliceSequence
 
 class TrainingWorker(QThread):
     update_progress = Signal(int)
@@ -62,8 +62,7 @@ class TrainingWorker(QThread):
                                         return_sequences=ret_seq, activation='relu'))
                     
                 if i == self.num_layers - 1:
-                    _horizon = self.horizon 
-                    model.add(Lambda(lambda x, h=_horizon: x[:, -h:, :, :, :]))
+                    model.add(SliceSequence(horizon=self.horizon))
                 
                 model.add(BatchNormalization())
                 

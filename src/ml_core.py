@@ -83,3 +83,22 @@ def buat_metrik_spasial(batas_threshold):
     spatial_auc.__name__ = 'spatial_auc'
     
     return spatial_precision, spatial_recall, spatial_f1, spatial_auc
+
+class SliceSequence(tf.keras.layers.Layer):
+    """
+    Custom Layer untuk memotong sequence/waktu.
+    Aman untuk disimpan dan dimuat ulang oleh Keras.
+    """
+    def __init__(self, horizon=1, **kwargs):
+        super().__init__(**kwargs)
+        self.horizon = horizon
+
+    def call(self, inputs):
+        # Ambil N frame terakhir di dimensi ke-1 (Waktu)
+        return inputs[:, -self.horizon:, :, :, :]
+
+    def get_config(self):
+        # Fungsi wajib agar Keras bisa menyimpan layer ini ke file .keras
+        config = super().get_config()
+        config.update({"horizon": self.horizon})
+        return config
