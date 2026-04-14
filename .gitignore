@@ -1,0 +1,41 @@
+# Python Caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+env/
+.env
+
+# IDE Settings
+.vscode/
+.idea/
+
+# Machine Learning Models (Ukuran besar)
+*.h5
+*.keras
+models/
+checkpoint/
+
+# Geospatial & Dataset Files (Sangat besar, jangan diupload)
+*.nc
+*.tif
+*.tiff
+data/*.nc
+data/*.tif
+
+# Large Shapefiles
+# (Kita abaikan isinya tapi tetap biarkan folder shapefiles/ ada)
+shapefiles/*.shp
+shapefiles/*.shx
+shapefiles/*.dbf
+shapefiles/*.prj
+shapefiles/*.cpg
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# Temporary prediction results
+temp/

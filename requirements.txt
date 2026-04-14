@@ -1,0 +1,18 @@
+# Core Data Processing
+numpy==1.26.4
+pandas==2.2.1
+scipy==1.12.0
+
+# Geospatial Analysis
+geopandas==0.14.3
+xarray==2024.2.0
+rioxarray==0.15.1
+shapely==2.0.3
+
+# Machine Learning
+tensorflow==2.15.0
+scikit-learn==1.4.1.post1
+
+# GUI & Visualization
+PySide6==6.6.2
+matplotlib==3.8.3
