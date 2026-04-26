@@ -71,7 +71,7 @@ class TrainingWorker(QThread):
                     model.add(Dropout(self.dropout_rate))
             
             # 🌟 PERUBAHAN 3: Layer Output dengan TimeDistributed
-            # Kita ingin Conv2D memproses setiap hari secara independen namun tetap dalam bentuk sequence
+            # Conv2D memproses setiap hari secara independen namun tetap dalam bentuk sequence
             model.add(TimeDistributed(Conv2D(filters=1, kernel_size=(1, 1), activation='sigmoid', padding='same')))
             
             # ==========================================

@@ -71,7 +71,7 @@ class MainWindow(QMainWindow):
 
         self.config_region = {
             "Sumatra": {
-                "extent": [95.0, 106.0, -6.0, 6.0], # [lon_min, lon_max, lat_min, lat_max]
+                "extent": [95.0, 107.0, -6.0, 6.0], # [lon_min, lon_max, lat_min, lat_max]
                 "shp_batas": "shapefiles/batas_sumatra.shp"
             },
             "Kalimantan": {
