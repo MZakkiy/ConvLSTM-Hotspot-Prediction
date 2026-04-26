@@ -538,7 +538,31 @@ class MainWindow(QMainWindow):
                     col_date = 'acq_date' if 'acq_date' in self.df_hotspot.columns else 'date'
                     
                     # Ubah format teks menjadi format Tanggal (Datetime)
+                    # self.df_hotspot[col_date] = pd.to_datetime(self.df_hotspot[col_date])
+
                     self.df_hotspot[col_date] = pd.to_datetime(self.df_hotspot[col_date])
+                    
+                    # --- 🌟 TAMBAHAN: FILTER SPASIAL TITIK API DI LAHAN GAMBUT ---
+                    try:
+                        # Muat shapefile batas gambut
+                        gdf_gambut = gpd.read_file("shapefiles/Indonesia_peat_lands.shp")
+                        gdf_gambut = gdf_gambut.to_crs("EPSG:4326")
+                        
+                        # Jadikan dataframe pandas sebagai GeoDataFrame agar memiliki atribut spasial
+                        gdf_api = gpd.GeoDataFrame(
+                            self.df_hotspot, 
+                            geometry=gpd.points_from_xy(self.df_hotspot['longitude'], self.df_hotspot['latitude']),
+                            crs="EPSG:4326"
+                        )
+                        
+                        # Potong titik api agar hanya menyisakan yang mendarat di dalam poligon gambut
+                        gdf_api_gambut = gpd.clip(gdf_api, gdf_gambut)
+                        
+                        # Kembalikan ke wujud DataFrame biasa dan buang kolom geometri
+                        self.df_hotspot = pd.DataFrame(gdf_api_gambut).drop(columns=['geometry'])
+                    except Exception as e:
+                        print(f"Error: Could not filter hotspots by peatland shapefile. Proceeding with all hotspots. Details: {e}")
+                    # --------------------------------------------------------------
                     
                     # --- PERBAIKAN SINKRONISASI WAKTU ---
                     # Jika user memuat data NASA sebelum memuat data Suhu/Hujan,
@@ -551,7 +575,9 @@ class MainWindow(QMainWindow):
                         # Set batas maksimal slider sesuai jumlah hari unik yang ada apinya
                         self.slider_waktu.setMaximum(len(self.waktu_kordinat) - 1)
                     
-                    QMessageBox.information(self, "Success", f"Hotspot CSV loaded successfully!\nTotal unique days with hotspots: {len(self.waktu_kordinat)}")
+                    total_api = len(self.df_hotspot)
+                    
+                    QMessageBox.information(self, "Success", f"Hotspot CSV loaded successfully!\nTotal unique days with hotspots: {len(self.waktu_kordinat)}\nTotal hotspot points: {total_api}")
                     
                 # --- 2. JIKA FILE ADALAH GEOTIFF (.tif) ---
                 elif file_path.endswith('.tif') or file_path.endswith('.tiff'):
@@ -559,9 +585,20 @@ class MainWindow(QMainWindow):
                     ds = rioxarray.open_rasterio(file_path)
                     
                     try:
+                        # gdf = gpd.read_file(path_shp_aktif)
+                        # # GeoTIFF biasanya sudah punya CRS, kita langsung clip
+                        # ds = ds.rio.clip(gdf.geometry, gdf.crs, drop=False)
+
                         gdf = gpd.read_file(path_shp_aktif)
                         # GeoTIFF biasanya sudah punya CRS, kita langsung clip
                         ds = ds.rio.clip(gdf.geometry, gdf.crs, drop=False)
+
+                        # --- 🌟 TAMBAHAN: POTONG LAGI KHUSUS LAHAN GAMBUT ---
+                        # Menggunakan drop=False sangat penting agar ukuran matriks (bingkai) tetap sama dengan ukuran pulau
+                        gdf_gambut = gpd.read_file("shapefiles/Indonesia_peat_lands.shp")
+                        gdf_gambut = gdf_gambut.to_crs("EPSG:4326")
+                        ds = ds.rio.clip(gdf_gambut.geometry, gdf_gambut.crs, drop=False)
+                        # ----------------------------------------------------
 
                         # Ambil batas asli dari data (minx, miny, maxx, maxy)
                         bounds = ds.rio.bounds()
@@ -594,11 +631,23 @@ class MainWindow(QMainWindow):
                     # 1. POTONG SPASIAL DULU (Biar enteng prosesnya)
                     try:
                         gdf = gpd.read_file(path_shp_aktif)
+                        # x_dim = 'longitude' if 'longitude' in ds.dims else 'lon'
+                        # y_dim = 'latitude' if 'latitude' in ds.dims else 'lat'
+                        # ds = ds.rio.set_spatial_dims(x_dim=x_dim, y_dim=y_dim, inplace=True)
+                        # ds = ds.rio.write_crs("epsg:4326", inplace=True)
+                        # ds = ds.rio.clip(gdf.geometry, gdf.crs, drop=False)
+
                         x_dim = 'longitude' if 'longitude' in ds.dims else 'lon'
                         y_dim = 'latitude' if 'latitude' in ds.dims else 'lat'
                         ds = ds.rio.set_spatial_dims(x_dim=x_dim, y_dim=y_dim, inplace=True)
                         ds = ds.rio.write_crs("epsg:4326", inplace=True)
                         ds = ds.rio.clip(gdf.geometry, gdf.crs, drop=False)
+
+                        # --- 🌟 TAMBAHAN: POTONG LAGI KHUSUS LAHAN GAMBUT ---
+                        gdf_gambut = gpd.read_file("shapefiles/Indonesia_peat_lands.shp")
+                        gdf_gambut = gdf_gambut.to_crs("EPSG:4326")
+                        ds = ds.rio.clip(gdf_gambut.geometry, gdf_gambut.crs, drop=False)
+                        # ----------------------------------------------------
                     except Exception as e:
                         print(f"Warning Clipping NetCDF: {e}")
                     
