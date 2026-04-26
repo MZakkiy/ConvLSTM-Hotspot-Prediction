@@ -1057,9 +1057,18 @@ class MainWindow(QMainWindow):
             # 2. AMBIL DATA N HARI TERAKHIR
             time_steps = self.spin_timesteps.value() # Jika Anda sudah punya input ini
             
-            hujan_last = np.nan_to_num(self.data_hujan[-time_steps:], nan=0.0)
-            suhu_last = np.nan_to_num(self.data_suhu[-time_steps:], nan=0.0)
-            kelem_last = np.nan_to_num(self.data_kelembapan[-time_steps:], nan=0.0)
+            # hujan_last = np.nan_to_num(self.data_hujan[-time_steps:], nan=0.0)
+            # suhu_last = np.nan_to_num(self.data_suhu[-time_steps:], nan=0.0)
+            # kelem_last = np.nan_to_num(self.data_kelembapan[-time_steps:], nan=0.0)
+
+            # Hitung ekstremum keseluruhan dulu untuk mengisi area luar pulau
+            max_hujan_global = np.nanmax(self.data_hujan) if np.any(~np.isnan(self.data_hujan)) else 0.0
+            min_suhu_global = np.nanmin(self.data_suhu) if np.any(~np.isnan(self.data_suhu)) else 0.0
+
+            # Ganti NaN sesuai aturan baru pada N hari terakhir
+            hujan_last = np.nan_to_num(self.data_hujan[-time_steps:], nan=max_hujan_global)
+            suhu_last = np.nan_to_num(self.data_suhu[-time_steps:], nan=min_suhu_global)
+            kelem_last = np.nan_to_num(self.data_kelembapan[-time_steps:], nan=1.0)
             
             # 3. SAMAKAN UKURAN SPASIAL
             tinggi_target, lebar_target = hujan_last.shape[1], hujan_last.shape[2]

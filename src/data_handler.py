@@ -60,9 +60,20 @@ def siapkan_data_mentah(data_hujan, data_suhu, data_kelem, df_hotspot, waktu_kor
     Hanya merapikan data menjadi 3D (Hari, Lat, Lon), TIDAK membuat Tensor 5D.
     """
     # 1. Bersihkan NaN
-    hujan_bersih = np.nan_to_num(data_hujan, nan=0.0)
-    suhu_bersih = np.nan_to_num(data_suhu, nan=0.0)
-    kelem_bersih = np.nan_to_num(data_kelem, nan=0.0)
+    # hujan_bersih = np.nan_to_num(data_hujan, nan=0.0)
+    # suhu_bersih = np.nan_to_num(data_suhu, nan=0.0)
+    # kelem_bersih = np.nan_to_num(data_kelem, nan=0.0)
+
+    # Curah hujan: Ubah NaN jadi nilai maksimal pada keseluruhan data hujan
+    max_hujan = np.nanmax(data_hujan) if np.any(~np.isnan(data_hujan)) else 0.0
+    hujan_bersih = np.nan_to_num(data_hujan, nan=max_hujan)
+
+    # Suhu: Ubah NaN jadi nilai minimal pada keseluruhan data suhu
+    min_suhu = np.nanmin(data_suhu) if np.any(~np.isnan(data_suhu)) else 0.0
+    suhu_bersih = np.nan_to_num(data_suhu, nan=min_suhu)
+
+    # Kelembapan tanah: Ubah NaN jadi 1
+    kelem_bersih = np.nan_to_num(data_kelem, nan=1.0)
 
     # 2. Samakan Jumlah Hari
     min_hari = min(hujan_bersih.shape[0], suhu_bersih.shape[0], kelem_bersih.shape[0])
