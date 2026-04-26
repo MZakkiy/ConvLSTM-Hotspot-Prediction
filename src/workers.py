@@ -78,7 +78,28 @@ class TrainingWorker(QThread):
             # PILIH FUNGSI LOSS BERDASARKAN COMBOBOX
             # ==========================================
             if self.loss_name == "Weighted Binary Crossentropy":
-                loss_dipakai = weighted_binary_crossentropy(1.0, 200.0)
+                # 1. Ambil matriks data target (hotspot) dari generator
+                y_train_data = self.train_gen.hotspot
+                
+                # 2. Hitung jumlah pixel untuk masing-masing kelas
+                total_api = np.sum(y_train_data)
+                total_pixel = y_train_data.size
+                total_aman = total_pixel - total_api
+                
+                # 3. Tetapkan bobot
+                weight_zero = 1.0
+                
+                # Bobot kelas api adalah rasio kelas negatif (aman) dibagi positif (api)
+                # Diberi kondisi if untuk mencegah error pembagian dengan nol (ZeroDivisionError)
+                if total_api > 0:
+                    weight_one = float(total_aman / total_api)
+                else:
+                    weight_one = 1.0 
+                    
+                # Kirim informasi bobot dinamis ini agar tampil di antarmuka GUI (Opsional)
+                self.update_status.emit(f"Menerapkan bobot dinamis: Aman={weight_zero}, Api={weight_one:.2f}")
+                
+                loss_dipakai = weighted_binary_crossentropy(weight_zero, weight_one)
             elif self.loss_name == "MSE":
                 loss_dipakai = 'mse'
             else:
