@@ -15,6 +15,8 @@ from PySide6.QtGui import QIcon, QPainter, QColor
 from PySide6.QtCore import Qt
 
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+import joblib
 
 from .data_handler import FireDataGenerator, siapkan_data_mentah
 from .workers import TrainingWorker, EvaluasiWorker
@@ -53,6 +55,7 @@ class MainWindow(QMainWindow):
         self.waktu_kordinat = None
         # Variabel untuk menampung model ML di memori
         self.model_convlstm = None
+        self.scaler = None
 
         # Variabel penampung riwayat metrik
         self.history_epochs = []
@@ -899,6 +902,23 @@ class MainWindow(QMainWindow):
                 self.data_hujan, self.data_suhu, self.data_kelembapan, 
                 self.df_hotspot, self.waktu_kordinat, extent
             )
+
+            data_stack = np.stack([hujan, suhu, kelem], axis=-1)
+            original_shape = data_stack.shape
+            
+            # Flatten data agar bisa masuk ke MinMaxScaler (Samples, Features)
+            data_flat = data_stack.reshape(-1, 3)
+            
+            self.scaler = MinMaxScaler(feature_range=(0, 1))
+            data_scaled_flat = self.scaler.fit_transform(data_flat)
+            
+            # Kembalikan ke bentuk (Total_Hari, H, W, 3)
+            data_scaled = data_scaled_flat.reshape(original_shape)
+            
+            # Pisahkan kembali ke variabel masing-masing
+            hujan = data_scaled[..., 0]
+            suhu = data_scaled[..., 1]
+            kelem = data_scaled[..., 2]
             
             total_hari = len(hujan)
             minimal_hari_dibutuhkan = (time_steps + 1) * 5 # Rumus aman untuk rasio 80:20
@@ -977,11 +997,10 @@ class MainWindow(QMainWindow):
 
         # Buka jendela dialog agar user bisa memilih lokasi dan nama file
         # Ekstensi default yang kita sarankan adalah .keras
+
         file_path, _ = QFileDialog.getSaveFileName(
-            self, 
-            "Save Trained Model", 
-            "model_prediksi_gambut.keras", # Nama file rekomendasi
-            "Keras Model (*.keras);;HDF5 Model (*.h5);;All Files (*.*)"
+            self, "Save Trained Model", "model_prediksi_gambut.keras",
+            "Keras Model (*.keras);;All Files (*.*)"
         )
         
         if file_path:
@@ -992,6 +1011,10 @@ class MainWindow(QMainWindow):
                 
                 # Fungsi bawaan TensorFlow untuk menyimpan model utuh (Arsitektur + Bobot)
                 self.model_convlstm.save(file_path)
+                
+                if self.scaler is not None:
+                    scaler_path = file_path.replace(".keras", "_scaler.pkl")
+                    joblib.dump(self.scaler, scaler_path)
                 
                 QMessageBox.information(self, "Success", f"Model successfully saved to:\n{file_path}")
                 
@@ -1082,6 +1105,15 @@ class MainWindow(QMainWindow):
                     safe_mode=False
                 )
 
+                scaler_path = file_path.replace(".keras", "_scaler.pkl").replace(".h5", "_scaler.pkl")
+                
+                if os.path.exists(scaler_path):
+                    self.scaler = joblib.load(scaler_path)
+                    QMessageBox.information(self, "Success", "Model and Scaler loaded successfully!")
+                else:
+                    self.scaler = None
+                    QMessageBox.warning(self, "Warning", "Model loaded, but Scaler file was not found (.pkl). Prediction might be inaccurate.")
+
                 # Cek atribut model untuk menyesuaikan UI 
                 # Mencoba mendeteksi horizon dari layer Lambda jika memungkinkan
                 try:
@@ -1092,7 +1124,6 @@ class MainWindow(QMainWindow):
                 except:
                     pass
 
-                QMessageBox.information(self, "Success", f"Model loaded successfully!\nLocation: {file_path}")
                 self.btn_prediksi.setEnabled(True) # Aktifkan tombol prediksi
                 
             except Exception as e:
@@ -1144,11 +1175,24 @@ class MainWindow(QMainWindow):
             kelem_last = resize_last(kelem_last)
             
             # Gabungkan jadi (1, time_steps, tinggi, lebar, 3)
-            X_input = np.stack([hujan_last, suhu_last, kelem_last], axis=-1)
-            X_input = np.expand_dims(X_input, axis=0) 
+            # X_input = np.stack([hujan_last, suhu_last, kelem_last], axis=-1)
+            # X_input = np.expand_dims(X_input, axis=0) 
+
+            X_raw = np.stack([hujan_last, suhu_last, kelem_last], axis=-1)
+            sh = X_raw.shape
+            
+            # Gunakan scaler yang disimpan di memori
+            X_scaled_flat = self.scaler.transform(X_raw.reshape(-1, 3))
+            X_input_final = X_scaled_flat.reshape(sh)
+            
+            # Tambahkan dimensi batch (1, time_steps, H, W, 3)
+            X_input_final = np.expand_dims(X_input_final, axis=0) 
+            
+            # 4. PREDIKSI!
+            hasil_prediksi = self.model_convlstm.predict(X_input_final, verbose=0)
             
             # 4. LOAD MODEL DAN PREDIKSI!
-            hasil_prediksi = self.model_convlstm.predict(X_input, verbose=0)
+            # hasil_prediksi = self.model_convlstm.predict(X_input, verbose=0)
             
             # 🌟 PERUBAHAN MULTI-STEP: Ekstrak matriks 3D (Horizon, Tinggi, Lebar)
             # hasil_prediksi shape aslinya: (1, horizon, tinggi, lebar, 1)

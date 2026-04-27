@@ -15,6 +15,7 @@ env/
 # Machine Learning Models (Ukuran besar)
 *.h5
 *.keras
+*.pkl
 models/
 checkpoint/
 

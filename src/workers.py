@@ -92,7 +92,7 @@ class TrainingWorker(QThread):
                 # Bobot kelas api adalah rasio kelas negatif (aman) dibagi positif (api)
                 # Diberi kondisi if untuk mencegah error pembagian dengan nol (ZeroDivisionError)
                 if total_api > 0:
-                    weight_one = float(total_aman / total_api / 10)
+                    weight_one = float(total_aman / total_api / 8)
                 else:
                     weight_one = 1.0 
                 
