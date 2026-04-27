@@ -12,7 +12,7 @@ class TrainingWorker(QThread):
     update_metrics = Signal(int, float, float) 
     training_finished = Signal()
 
-    sinyal_evaluasi = Signal(float, float, float, float)
+    sinyal_evaluasi = Signal(float, float, float, float, float)
 
     # Tambahkan parameter X_data dan Y_data
     def __init__(self, epochs, batch_size, train_gen, val_gen, layers, filters, dropout, optimizer, loss_func, eval_threshold):
@@ -92,9 +92,11 @@ class TrainingWorker(QThread):
                 # Bobot kelas api adalah rasio kelas negatif (aman) dibagi positif (api)
                 # Diberi kondisi if untuk mencegah error pembagian dengan nol (ZeroDivisionError)
                 if total_api > 0:
-                    weight_one = float(total_aman / total_api)
+                    weight_one = float(total_aman / total_api / 10)
                 else:
                     weight_one = 1.0 
+                
+                print(f"Bobot Dinamis: Aman={weight_zero}, Api={weight_one:.2f}")
                     
                 # Kirim informasi bobot dinamis ini agar tampil di antarmuka GUI (Opsional)
                 self.update_status.emit(f"Menerapkan bobot dinamis: Aman={weight_zero}, Api={weight_one:.2f}")
@@ -148,9 +150,29 @@ class TrainingWorker(QThread):
             val_recall = skor_evaluasi[2]
             val_f1 = skor_evaluasi[3]
             val_auc = skor_evaluasi[4]
+
+            jarak_total = []
+            
+            if self.val_gen is not None:
+                # Iterasi seluruh batch
+                for i in range(len(self.val_gen)):
+                    X_batch, y_batch = self.val_gen[i]
+                    y_pred_batch = model.predict(X_batch, verbose=0)
+                    
+                    # Terapkan threshold 
+                    y_pred_biner = (y_pred_batch > self.eval_threshold).astype(int)
+                    
+                    # Iterasi setiap sampel gambar 2D dari dimensi (Batch, Horizon, H, W, Channel)
+                    for b in range(y_batch.shape[0]):
+                        for t in range(y_batch.shape[1]):
+                            jarak = hitung_jarak_meleset_piksel(y_batch[b, t, :, :, 0], y_pred_biner[b, t, :, :, 0])
+                            if not np.isnan(jarak):  # Hindari Error saat matriks api kosong
+                                jarak_total.append(jarak)
+                                
+            val_jarak = np.mean(jarak_total) if len(jarak_total) > 0 else 0.0
             
             # Tembakkan sinyalnya ke MainWindow!
-            self.sinyal_evaluasi.emit(val_precision, val_recall, val_f1, val_auc)
+            self.sinyal_evaluasi.emit(val_precision, val_recall, val_f1, val_auc, val_jarak)
             
             self.update_status.emit("Training dan Evaluasi Selesai!")
             
@@ -162,7 +184,7 @@ class TrainingWorker(QThread):
             self.training_finished.emit()
 
 class EvaluasiWorker(QThread):
-    sinyal_hasil = Signal(float, float, float, float)
+    sinyal_hasil = Signal(float, float, float, float, float)
     sinyal_status = Signal(str)
     
     # 🌟 UBAH path_model MENJADI model_obj
@@ -182,22 +204,26 @@ class EvaluasiWorker(QThread):
             # Langsung compile ulang model yang ada di RAM
             self.model.compile(optimizer='adam', loss='mse', metrics=['accuracy', f_precision, f_recall, f_f1, f_auc])
 
-            # for m in self.model.metrics:
-            #     # Jika ini adalah kontainer 'CompileMetrics'
-            #     if hasattr(m, 'metrics'):
-            #         for sub_metric in m.metrics:
-            #             if 'auc' in sub_metric.name.lower():
-            #                 sub_metric.reset_state()
-            #                 print(f"Berhasil meriset: {sub_metric.name}")
-                
-            #     # Jika metriknya berdiri sendiri (bergantung versi TF)
-            #     elif 'auc' in m.name.lower():
-            #         m.reset_state()
-            #         print(f"Berhasil meriset: {m.name}")
-
             skor = self.model.evaluate(self.val_gen, verbose=0)
+
+            jarak_total = []
             
-            self.sinyal_hasil.emit(skor[2], skor[3], skor[4], skor[5])
+            if self.val_gen is not None:
+                for i in range(len(self.val_gen)):
+                    X_batch, y_batch = self.val_gen[i]
+                    y_pred_batch = self.model.predict(X_batch, verbose=0)
+                    
+                    y_pred_biner = (y_pred_batch > self.threshold).astype(int)
+                    
+                    for b in range(y_batch.shape[0]):
+                        for t in range(y_batch.shape[1]):
+                            jarak = hitung_jarak_meleset_piksel(y_batch[b, t, :, :, 0], y_pred_biner[b, t, :, :, 0])
+                            if not np.isnan(jarak):
+                                jarak_total.append(jarak)
+                                
+            val_jarak = np.mean(jarak_total) if len(jarak_total) > 0 else 0.0
+            
+            self.sinyal_hasil.emit(skor[2], skor[3], skor[4], skor[5], val_jarak)
             self.sinyal_status.emit("Evaluasi Selesai!")
             
         except Exception as e:

@@ -336,10 +336,14 @@ class MainWindow(QMainWindow):
         
         self.label_val_f1 = QLineEdit("N/A")
         self.label_val_f1.setReadOnly(True)
+
+        self.label_val_jarak = QLineEdit("N/A")
+        self.label_val_jarak.setReadOnly(True)
         
         form_eval.addRow("Precision:", self.label_val_precision)
         form_eval.addRow("Recall:", self.label_val_recall)
         form_eval.addRow("F1-Score:", self.label_val_f1)
+        form_eval.addRow("Miss Distance (px):", self.label_val_jarak)
         
         group_eval.setLayout(form_eval)
         panel_kiri_ml.addWidget(group_eval)
@@ -1032,13 +1036,14 @@ class MainWindow(QMainWindow):
         
         self.eval_worker.start()
     
-    def tampilkan_hasil_evaluasi(self, precision, recall, f1, auc):
+    def tampilkan_hasil_evaluasi(self, precision, recall, f1, auc, jarak):
         """Fungsi untuk menangkap sinyal evaluasi dan mencetaknya ke GUI"""
         # Format angka menjadi 4 angka di belakang koma agar terlihat rapi
         self.label_val_precision.setText(f"{precision:.4f}")
         self.label_val_recall.setText(f"{recall:.4f}")
         self.label_val_f1.setText(f"{f1:.4f}")
         self.label_val_auc.setText(f"{auc:.4f}")
+        self.label_val_jarak.setText(f"{jarak:.2f} px")
 
     def selesai_training(self):
         self.btn_train.setEnabled(True)
