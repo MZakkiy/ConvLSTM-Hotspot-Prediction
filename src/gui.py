@@ -20,7 +20,7 @@ from .data_handler import FireDataGenerator, siapkan_data_mentah
 from .workers import TrainingWorker, EvaluasiWorker
 
 from tensorflow.keras.models import load_model
-from src.ml_core import weighted_binary_crossentropy, SliceSequence
+from src.ml_core import weighted_binary_crossentropy, SliceSequence, hitung_jarak_meleset_piksel
 
 
 # Import jembatan penghubung Matplotlib dan PySide
@@ -597,7 +597,7 @@ class MainWindow(QMainWindow):
                         # Menggunakan drop=False sangat penting agar ukuran matriks (bingkai) tetap sama dengan ukuran pulau
                         gdf_gambut = gpd.read_file("shapefiles/Indonesia_peat_lands.shp")
                         gdf_gambut = gdf_gambut.to_crs("EPSG:4326")
-                        ds = ds.rio.clip(gdf_gambut.geometry, gdf_gambut.crs, drop=False)
+                        ds = ds.rio.clip(gdf_gambut.geometry, gdf_gambut.crs, drop=True)
                         # ----------------------------------------------------
 
                         # Ambil batas asli dari data (minx, miny, maxx, maxy)
@@ -646,7 +646,7 @@ class MainWindow(QMainWindow):
                         # --- 🌟 TAMBAHAN: POTONG LAGI KHUSUS LAHAN GAMBUT ---
                         gdf_gambut = gpd.read_file("shapefiles/Indonesia_peat_lands.shp")
                         gdf_gambut = gdf_gambut.to_crs("EPSG:4326")
-                        ds = ds.rio.clip(gdf_gambut.geometry, gdf_gambut.crs, drop=False)
+                        ds = ds.rio.clip(gdf_gambut.geometry, gdf_gambut.crs, drop=True)
                         # ----------------------------------------------------
                     except Exception as e:
                         print(f"Warning Clipping NetCDF: {e}")
@@ -790,6 +790,13 @@ class MainWindow(QMainWindow):
                 tanggal_target = pd.to_datetime(tanggal_teks)
                 col_date = 'acq_date' if 'acq_date' in self.df_hotspot.columns else 'date'
                 df_hari_ini = self.df_hotspot[self.df_hotspot[col_date].dt.date == tanggal_target.date()]
+
+                df_hari_ini = df_hari_ini[
+                    (df_hari_ini['longitude'] >= batas_aktif[0]) & 
+                    (df_hari_ini['longitude'] <= batas_aktif[1]) & 
+                    (df_hari_ini['latitude'] >= batas_aktif[2]) & 
+                    (df_hari_ini['latitude'] <= batas_aktif[3])
+                ]
                 
                 if not df_hari_ini.empty:
                     x_api = df_hari_ini['longitude'].values
@@ -1152,6 +1159,7 @@ class MainWindow(QMainWindow):
             try:
                 path_gambut = r'shapefiles/Indonesia_peat_lands.shp' 
                 gdf_gambut = gpd.read_file(path_gambut)
+                gdf_gambut = gdf_gambut.to_crs(epsg=4326)
                 
                 # 🌟 PERBAIKAN DI SINI (Variabelnya ditukar agar sesuai sumbunya)
                 # Longitude (X) = batas Kiri ke Kanan = ukuran LEBAR

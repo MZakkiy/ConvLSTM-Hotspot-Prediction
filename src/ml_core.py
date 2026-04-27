@@ -1,5 +1,8 @@
 import tensorflow as tf
 from tensorflow.keras import backend as K
+import numpy as np
+from scipy.ndimage import distance_transform_edt
+
 
 def weighted_binary_crossentropy(weight_zero, weight_one):
     """
@@ -49,7 +52,7 @@ def buat_metrik_spasial(batas_threshold):
         y_true_4d, y_pred_4d = siapkan_tensor(y_true, y_pred)
         
         y_pred_biner = tf.cast(y_pred_4d > batas_threshold, tf.float32)
-        y_true_expanded = tf.nn.max_pool2d(y_true_4d, ksize=[1, 3, 3, 1], strides=[1, 1, 1, 1], padding='SAME')
+        y_true_expanded = tf.nn.max_pool2d(y_true_4d, ksize=[1, 5, 5, 1], strides=[1, 1, 1, 1], padding='SAME')
         
         true_positives = tf.reduce_sum(y_true_expanded * y_pred_biner)
         predicted_positives = tf.reduce_sum(y_pred_biner)
@@ -59,7 +62,7 @@ def buat_metrik_spasial(batas_threshold):
         y_true_4d, y_pred_4d = siapkan_tensor(y_true, y_pred)
         
         y_pred_biner = tf.cast(y_pred_4d > batas_threshold, tf.float32)
-        y_pred_expanded = tf.nn.max_pool2d(y_pred_biner, ksize=[1, 3, 3, 1], strides=[1, 1, 1, 1], padding='SAME')
+        y_pred_expanded = tf.nn.max_pool2d(y_pred_biner, ksize=[1, 5, 5, 1], strides=[1, 1, 1, 1], padding='SAME')
         
         true_positives = tf.reduce_sum(y_true_4d * y_pred_expanded)
         actual_positives = tf.reduce_sum(y_true_4d)
@@ -72,7 +75,7 @@ def buat_metrik_spasial(batas_threshold):
 
     def spatial_auc(y_true, y_pred):
         y_true_4d, y_pred_4d = siapkan_tensor(y_true, y_pred)
-        y_true_expanded = tf.nn.max_pool2d(y_true_4d, ksize=[1, 3, 3, 1], strides=[1, 1, 1, 1], padding='SAME')
+        y_true_expanded = tf.nn.max_pool2d(y_true_4d, ksize=[1, 5, 5, 1], strides=[1, 1, 1, 1], padding='SAME')
         
         auc_obj.update_state(y_true_expanded, y_pred_4d)
         return auc_obj.result()
@@ -102,3 +105,30 @@ class SliceSequence(tf.keras.layers.Layer):
         config = super().get_config()
         config.update({"horizon": self.horizon})
         return config
+
+def hitung_jarak_meleset_piksel(y_true_peta, y_pred_peta):
+    """
+    Menghitung rata-rata jarak meleset (dalam piksel) dari prediksi titik api 
+    terhadap titik api sebenarnya menggunakan Distance Transform.
+    """
+    # 1. Kasus ekstrem: Model tidak menebak ada api sama sekali (False Negatives total)
+    if np.sum(y_pred_peta) == 0:
+        return 0.0 
+        
+    # 2. Kasus ekstrem: Tidak ada api sama sekali di data asli, tapi model menebak ada api (False Positives total)
+    if np.sum(y_true_peta) == 0:
+        return np.nan 
+
+    # 3. Balikkan nilai y_true (0 jadi 1, 1 jadi 0) karena SciPy menghitung jarak ke nilai 0
+    titik_api_sebenarnya_inverted = (y_true_peta == 0).astype(int)
+
+    # 4. Buat Peta Jarak (Distance Transform)
+    peta_jarak = distance_transform_edt(titik_api_sebenarnya_inverted)
+
+    # 5. Ambil nilai jarak HANYA di koordinat tempat model memprediksi ada api
+    jarak_tebakan_model = peta_jarak[y_pred_peta == 1]
+
+    # 6. Rata-ratakan jarak tersebut
+    rata_rata_error_piksel = np.mean(jarak_tebakan_model)
+
+    return rata_rata_error_piksel

@@ -4,7 +4,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import ConvLSTM2D, BatchNormalization, Dropout, Conv2D, Lambda, TimeDistributed
 from tensorflow.keras.callbacks import Callback
 
-from .ml_core import weighted_binary_crossentropy, buat_metrik_spasial, SliceSequence
+from .ml_core import weighted_binary_crossentropy, buat_metrik_spasial, SliceSequence, hitung_jarak_meleset_piksel
 
 class TrainingWorker(QThread):
     update_progress = Signal(int)
