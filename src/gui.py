@@ -304,7 +304,7 @@ class MainWindow(QMainWindow):
         
         grid_training.addWidget(QLabel("Loss Function:"), 1, 2)
         self.combo_loss = QComboBox()
-        self.combo_loss.addItems(["Weighted Binary Crossentropy", "Binary Crossentropy", "MSE"])
+        self.combo_loss.addItems(["Weighted Binary Crossentropy", "Focal Loss", "Binary Crossentropy", "MSE"])
         grid_training.addWidget(self.combo_loss, 1, 3)
         
         group_training.setLayout(grid_training)

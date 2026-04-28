@@ -132,3 +132,32 @@ def hitung_jarak_meleset_piksel(y_true_peta, y_pred_peta):
     rata_rata_error_piksel = np.mean(jarak_tebakan_model)
 
     return rata_rata_error_piksel
+
+def focal_loss(alpha=0.25, gamma=2.0):
+    """
+    Fungsi Loss Kustom: Focal Loss
+    Sangat cocok untuk dataset imbalanced ekstrem seperti prediksi titik api spasial.
+    - alpha: Menyeimbangkan bobot kelas mayoritas (aman) dan minoritas (api).
+    - gamma: Memberikan fokus lebih pada sampel yang sulit diprediksi (hard examples).
+    """
+    def loss(y_true, y_pred):
+        y_true = tf.cast(y_true, tf.float32)
+        y_pred = tf.cast(y_pred, tf.float32)
+        
+        # Cegah nilai probabilitas menyentuh angka mutlak 0 atau 1
+        epsilon = K.epsilon()
+        y_pred = tf.clip_by_value(y_pred, epsilon, 1. - epsilon)
+        
+        # Hitung Cross Entropy standar untuk masing-masing tebakan
+        bce_api = -y_true * tf.math.log(y_pred)
+        bce_aman = -(1. - y_true) * tf.math.log(1. - y_pred)
+        
+        # Modulating factor: (1 - pt)^gamma
+        # Model akan "menghukum" kesalahan pada tebakan titik api secara lebih agresif
+        loss_api = alpha * tf.math.pow(1. - y_pred, gamma) * bce_api
+        loss_aman = (1. - alpha) * tf.math.pow(y_pred, gamma) * bce_aman
+        
+        # Kembalikan rata-rata total hukumannya
+        return tf.reduce_mean(loss_api + loss_aman)
+        
+    return loss

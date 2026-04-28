@@ -4,7 +4,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import ConvLSTM2D, BatchNormalization, Dropout, Conv2D, Lambda, TimeDistributed
 from tensorflow.keras.callbacks import Callback
 
-from .ml_core import weighted_binary_crossentropy, buat_metrik_spasial, SliceSequence, hitung_jarak_meleset_piksel
+from .ml_core import weighted_binary_crossentropy, buat_metrik_spasial, SliceSequence, hitung_jarak_meleset_piksel, focal_loss
 
 class TrainingWorker(QThread):
     update_progress = Signal(int)
@@ -102,6 +102,29 @@ class TrainingWorker(QThread):
                 self.update_status.emit(f"Menerapkan bobot dinamis: Aman={weight_zero}, Api={weight_one:.2f}")
                 
                 loss_dipakai = weighted_binary_crossentropy(weight_zero, weight_one)
+            elif self.loss_name == "Focal Loss":
+                # 1. Ambil matriks data target (hotspot) dari generator
+                y_train_data = self.train_gen.hotspot
+                
+                # 2. Hitung jumlah pixel untuk rasio
+                total_api = np.sum(y_train_data)
+                total_pixel = y_train_data.size
+                total_aman = total_pixel - total_api
+                
+                # 3. Hitung Alpha secara dinamis (Rasio piksel aman dari total piksel)
+                if total_pixel > 0:
+                    alpha_dinamis = float(total_aman / total_pixel)
+                else:
+                    alpha_dinamis = 0.25 # Standar awal
+                
+                # Gamma standar yang direkomendasikan adalah 2.0
+                gamma_val = 5.0
+                
+                print(f"Focal Loss Dinamis: Alpha={alpha_dinamis:.4f}, Gamma={gamma_val}")
+                self.update_status.emit(f"Menerapkan Focal Loss: Alpha={alpha_dinamis:.4f}, Gamma={gamma_val}")
+                
+                loss_dipakai = focal_loss(alpha=alpha_dinamis, gamma=gamma_val)
+
             elif self.loss_name == "MSE":
                 loss_dipakai = 'mse'
             else:
