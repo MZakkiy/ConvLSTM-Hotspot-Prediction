@@ -56,7 +56,7 @@ class TrainingWorker(QThread):
                 if i == 0:
                     model.add(ConvLSTM2D(filters=self.filters, kernel_size=(3, 3), padding='same', 
                                         return_sequences=ret_seq, activation='relu', 
-                                        input_shape=(time_steps, tinggi,  lebar, channels)))
+                                        input_shape=(time_steps, tinggi, lebar, channels)))
                 else:
                     model.add(ConvLSTM2D(filters=self.filters, kernel_size=(3, 3), padding='same', 
                                         return_sequences=ret_seq, activation='relu'))
@@ -153,40 +153,8 @@ class TrainingWorker(QThread):
                     verbose=0
                 )
             
-            print(4)
             # 6. SIMPAN MODEL KE DALAM VARIABEL WORKER (BUKAN KE HARD DISK)
-            # self.model_hasil = model
-
-            full_model = Sequential()
-            # Ambil dimensi asli peta sesungguhnya (misal 120x120)
-            full_H = getattr(self, 'val_gen_full', self.train_gen).hotspot.shape[1]
-            full_W = getattr(self, 'val_gen_full', self.train_gen).hotspot.shape[2]
-            
-            for i in range(self.num_layers):
-                ret_seq = True 
-                if i == 0:
-                    # BANGUN ULANG DENGAN UKURAN PETA PENUH
-                    full_model.add(ConvLSTM2D(filters=self.filters, kernel_size=(3, 3), padding='same', 
-                                        return_sequences=ret_seq, activation='relu', 
-                                        input_shape=(time_steps, full_H, full_W, channels)))
-                else:
-                    full_model.add(ConvLSTM2D(filters=self.filters, kernel_size=(3, 3), padding='same', 
-                                        return_sequences=ret_seq, activation='relu'))
-                
-                if i == self.num_layers - 1:
-                    full_model.add(SliceSequence(horizon=self.horizon))
-                
-                full_model.add(BatchNormalization())
-                if self.dropout_rate > 0:
-                    full_model.add(Dropout(self.dropout_rate))
-            
-            full_model.add(TimeDistributed(Conv2D(filters=1, kernel_size=(1, 1), activation='sigmoid', padding='same')))
-            
-            # INI KUNCI UTAMANYA: Salin bobot hasil belajar ke model baru!
-            full_model.set_weights(model.get_weights())
-            
-            # Simpan model penuh ini ke RAM UI Anda
-            self.model_hasil = full_model
+            self.model_hasil = model
 
             # ==========================================
             # EVALUASI OTOMATIS PADA DATA VALIDASI
@@ -194,11 +162,10 @@ class TrainingWorker(QThread):
             self.update_status.emit("Melakukan Evaluasi Akhir pada Data Validasi...")
 
             f_prec, f_rec, f_f1, f_auc = buat_metrik_spasial(self.eval_threshold)
-            full_model.compile(optimizer='adam', loss='mse', metrics=[f_prec, f_rec, f_f1, f_auc])
+            model.compile(optimizer='adam', loss='mse', metrics=[f_prec, f_rec, f_f1, f_auc])
             
             # Perintah ini akan menguji model pada data yang tidak dipakai belajar (val_gen)
-            val_gen_terakhir = getattr(self, 'val_gen_full', self.val_gen)
-            skor_evaluasi = full_model.evaluate(val_gen_terakhir, verbose=0)
+            skor_evaluasi = model.evaluate(self.val_gen, verbose=0)
             
             # Urutan output dari evaluate() mengikuti urutan saat kita melakukan model.compile()
             # Yaitu: [loss, precision, recall, f1_metric]
@@ -209,11 +176,11 @@ class TrainingWorker(QThread):
 
             jarak_total = []
             
-            if val_gen_terakhir is not None:
+            if self.val_gen is not None:
                 # Iterasi seluruh batch
-                for i in range(len(val_gen_terakhir)):
-                    X_batch, y_batch = val_gen_terakhir[i]
-                    y_pred_batch = full_model.predict(X_batch, verbose=0)
+                for i in range(len(self.val_gen)):
+                    X_batch, y_batch = self.val_gen[i]
+                    y_pred_batch = model.predict(X_batch, verbose=0)
                     
                     # Terapkan threshold 
                     y_pred_biner = (y_pred_batch > self.eval_threshold).astype(int)
@@ -236,7 +203,6 @@ class TrainingWorker(QThread):
             self.training_finished.emit()
             
         except Exception as e:
-            print(f"Error saat training: {str(e)}")
             self.update_status.emit(f"❌ Error saat training: {str(e)}")
             self.training_finished.emit()
 
