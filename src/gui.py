@@ -18,7 +18,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 import joblib
 
-from .data_handler import FireDataGenerator, siapkan_data_mentah
+from .data_handler import FireDataGenerator, siapkan_data_mentah, PatchFireDataGenerator, temporal_split, FullFrameValDataGenerator
 from .workers import TrainingWorker, EvaluasiWorker
 
 from tensorflow.keras.models import load_model
@@ -857,25 +857,17 @@ class MainWindow(QMainWindow):
         """Fungsi yang dipanggil saat tombol Mulai ditekan"""
         
         # --- 1. VALIDASI (SATPAM) ---
-        # Cek apakah semua 4 data sudah dimasukkan oleh user
         if self.data_hujan is None or self.data_suhu is None or self.data_kelembapan is None or self.df_hotspot is None:
             QMessageBox.warning(self, "Warning", "Please import all four datasets (Rainfall, Temperature, Soil Moisture, and Hotspots) in the Data Preparation tab first!")
             return
         
-        # 1. Reset data history (list) agar kosong kembali
-        # Sesuaikan dengan nama variabel list yang Anda gunakan
+        # Reset history dan bersihkan kanvas
         self.history_loss = []
         self.history_val_loss = []
         self.history_epochs = []
-
-        # 2. BERSIHKAN KANVAS PLOT
-        self.ax_metrics.clear() # Menghapus semua garis lama
-        
-        # 3. SET ULANG LABEL (Karena .clear() menghapus semuanya termasuk teks)
+        self.ax_metrics.clear()
         self.ax_metrics.set_xlabel('Epoch', color='black')
         self.ax_metrics.set_ylabel('Loss', color='black')
-        
-        # Gambar ulang kanvas kosongnya
         self.canvas_metrics.draw()
 
         # Ambil nilai dari UI
@@ -888,80 +880,105 @@ class MainWindow(QMainWindow):
         dropout = self.spin_dropout.value()
         optimizer = self.combo_optimizer.currentText()
         loss_func = self.combo_loss.currentText()
+        eval_threshold = self.spin_eval_threshold.value()
         
         self.btn_train.setEnabled(False)
         QApplication.processEvents()
         
-        # --- 2. RAKIT TENSORNYA ---
+        # --- 2. RAKIT TENSOR & GENERATOR (SKEMA IMBALANCE) ---
         try:
             extent = self.extent_suhu 
             
-            # 1. SIAPKAN DATA MENTAH (BAHAN BAKU)
             # 1. SIAPKAN DATA MENTAH (BAHAN BAKU)
             hujan, suhu, kelem, hotspot = siapkan_data_mentah(
                 self.data_hujan, self.data_suhu, self.data_kelembapan, 
                 self.df_hotspot, self.waktu_kordinat, extent
             )
 
+            # 2. NORMALISASI (MinMaxScaler)
+            # Dilakukan pada seluruh data sebelum split untuk konsistensi rentang nilai
             data_stack = np.stack([hujan, suhu, kelem], axis=-1)
             original_shape = data_stack.shape
-            
-            # Flatten data agar bisa masuk ke MinMaxScaler (Samples, Features)
             data_flat = data_stack.reshape(-1, 3)
             
             self.scaler = MinMaxScaler(feature_range=(0, 1))
             data_scaled_flat = self.scaler.fit_transform(data_flat)
-            
-            # Kembalikan ke bentuk (Total_Hari, H, W, 3)
             data_scaled = data_scaled_flat.reshape(original_shape)
             
-            # Pisahkan kembali ke variabel masing-masing
-            hujan = data_scaled[..., 0]
-            suhu = data_scaled[..., 1]
-            kelem = data_scaled[..., 2]
+            hujan_sc = data_scaled[..., 0]
+            suhu_sc = data_scaled[..., 1]
+            kelem_sc = data_scaled[..., 2]
             
-            total_hari = len(hujan)
-            minimal_hari_dibutuhkan = (time_steps + 1) * 5 # Rumus aman untuk rasio 80:20
+            # 3. TEMPORAL-SAFE SPLIT (Penerapan Skema)
+            # Membagi data secara kronologis: Train (70%), Val (15%), Test (15%)
+            train_set, val_set = temporal_split(
+                hujan_sc, suhu_sc, kelem_sc, hotspot, 
+                train_ratio=0.8 
+            )
             
-            # 2. CEK APAKAH DATA CUKUP BANYAK
-            if total_hari < minimal_hari_dibutuhkan:
-                QMessageBox.information(self, "Info Dataset", 
-                                    f"Total data: {total_hari} hari.\n"
-                                    f"Karena terlalu sedikit untuk dibagi dengan Time Steps {time_steps}, "
-                                    "pelatihan akan menggunakan 100% data tanpa Validasi.")
-                
-                # Gunakan 100% data untuk training
-                train_gen = FireDataGenerator(hujan, suhu, kelem, hotspot, time_steps, horizon, batch_size, shuffle=True)
-                self.val_gen = None # Kosongkan validasi
-                
-            else:
-                # BAGI DATA MENJADI TRAIN DAN VAL (80:20) SECARA NORMAL
-                split_idx = int(total_hari * 0.8)
-                hujan_tr, suhu_tr, kelem_tr, hotspot_tr = hujan[:split_idx], suhu[:split_idx], kelem[:split_idx], hotspot[:split_idx]
-                hujan_val, suhu_val, kelem_val, hotspot_val = hujan[split_idx:], suhu[split_idx:], kelem[split_idx:], hotspot[split_idx:]
-                
-                train_gen = FireDataGenerator(hujan_tr, suhu_tr, kelem_tr, hotspot_tr, time_steps, horizon, batch_size, shuffle=True)
-                self.val_gen = FireDataGenerator(hujan_val, suhu_val, kelem_val, hotspot_val, time_steps, horizon, batch_size, shuffle=False)
-            
-            # Ambil nilai threshold evaluasi dari UI
-            eval_threshold = self.spin_eval_threshold.value()
+            # Bongkar tuplenya
+            h_tr, s_tr, k_tr, y_tr = train_set
+            h_val, s_val, k_val, y_val = val_set
+
+            print(1)
+
+            # 4. INISIALISASI GENERATOR
+            # Generator Training: Menggunakan Patching + Weighted Random Sampling
+            train_gen = PatchFireDataGenerator(
+                data_hujan=h_tr, data_suhu=s_tr, data_kelem=k_tr, data_hotspot=y_tr,
+                time_steps=time_steps, 
+                horizon=horizon, 
+                batch_size=batch_size, 
+                patch_size=(32, 32), # Sesuai skema diagram
+                stride=8,            # Langkah pergeseran window
+                hotspot_weight=15.0  # Menangani imbalance (oversample hotspot 15x)
+            )
+
+            # Generator Validasi Patch (Khusus untuk memantau Loss/Grafik saat proses training)
+            self.val_gen_patch = PatchFireDataGenerator(
+                data_hujan=h_val, data_suhu=s_val, data_kelem=k_val, data_hotspot=y_val,
+                time_steps=time_steps, horizon=horizon, batch_size=batch_size, 
+                patch_size=(32, 32), stride=32, # Stride dibesarkan agar eksekusinya cepat
+                hotspot_weight=1.0 # 1.0 berarti MURNI (tidak ada oversampling)
+            )
+
+            print(2)
+
+            # Generator Validasi: Menggunakan Full Spatial Maps (Murni)
+            self.val_gen_full = FullFrameValDataGenerator(
+                data_hujan=h_val, data_suhu=s_val, data_kelem=k_val, data_hotspot=y_val,
+                time_steps=time_steps, 
+                horizon=horizon, 
+                batch_size=2 # Batch size kecil karena memuat peta utuh yang berat di RAM/GPU
+            )
+
+            print(3)
 
             # 3. JALANKAN WORKER
             self.worker = TrainingWorker(
-                epochs, batch_size, train_gen, self.val_gen,
-                layers, filters, dropout, optimizer, loss_func,  # <-- Kirim param baru
-                eval_threshold  # <-- Kirim nilai threshold evaluasi
+                epochs, batch_size, train_gen, self.val_gen_patch,
+                layers, filters, dropout, optimizer, loss_func,
+                eval_threshold
             )
+
+            # SUNTIKKAN Full Generator ke dalam worker agar bisa dipakai setelah training selesai
+            self.worker.val_gen_full = self.val_gen_full
             
+            # Sambungkan sinyal
             self.worker.update_progress.connect(self.progress_bar.setValue)
-            #self.worker.update_status.connect(self.label_status_ml.setText)
             self.worker.update_metrics.connect(self.update_grafik_training)
             self.worker.training_finished.connect(self.selesai_training)
             self.worker.sinyal_evaluasi.connect(self.tampilkan_hasil_evaluasi)
+            
+            # Tampilkan status di log (opsional jika label_status_ml tersedia)
+            if hasattr(self, 'label_status_ml'):
+                self.worker.update_status.connect(self.label_status_ml.setText)
+            
             self.worker.start()
 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Gagal: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Gagal memulai pelatihan: {str(e)}")
+            self.btn_train.setEnabled(True)
             self.selesai_training()
 
     def update_grafik_training(self, epoch, loss, val_loss):
@@ -1033,7 +1050,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", "Model belum dilatih! Latih dulu di tab Build ML Model.")
             return
             
-        if not hasattr(self, 'val_gen') or self.val_gen is None:
+        if not hasattr(self, 'val_gen_full') or self.val_gen_full is None:
             QMessageBox.warning(self, "Error", "Data validasi tidak tersedia! Pastikan dataset cukup untuk split train/val.")
             return
 
@@ -1048,7 +1065,7 @@ class MainWindow(QMainWindow):
         # self.label_val_f1.setText("Menghitung...")
         
         # Jalankan worker
-        self.eval_worker = EvaluasiWorker(self.model_convlstm, self.val_gen, threshold_baru)
+        self.eval_worker = EvaluasiWorker(self.model_convlstm, self.val_gen_full, threshold_baru)
         
         # Hubungkan sinyal ke fungsi yang sudah ada
         self.eval_worker.sinyal_hasil.connect(self.tampilkan_hasil_evaluasi)
