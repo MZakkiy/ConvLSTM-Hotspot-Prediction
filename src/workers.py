@@ -3,6 +3,7 @@ from PySide6.QtCore import QThread, Signal
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import ConvLSTM2D, BatchNormalization, Dropout, Conv2D, Lambda, TimeDistributed
 from tensorflow.keras.callbacks import Callback
+from tensorflow.keras.initializers import Constant
 
 from .ml_core import weighted_binary_crossentropy, buat_metrik_spasial, SliceSequence, hitung_jarak_meleset_piksel, focal_loss
 
@@ -72,7 +73,7 @@ class TrainingWorker(QThread):
             
             # 🌟 PERUBAHAN 3: Layer Output dengan TimeDistributed
             # Conv2D memproses setiap hari secara independen namun tetap dalam bentuk sequence
-            model.add(TimeDistributed(Conv2D(filters=1, kernel_size=(1, 1), activation='sigmoid', padding='same')))
+            model.add(TimeDistributed(Conv2D(filters=1, kernel_size=(1, 1), activation='sigmoid', padding='same', bias_initializer=Constant(-4.5))))
             
             # ==========================================
             # PILIH FUNGSI LOSS BERDASARKAN COMBOBOX
@@ -92,7 +93,7 @@ class TrainingWorker(QThread):
                 # Bobot kelas api adalah rasio kelas negatif (aman) dibagi positif (api)
                 # Diberi kondisi if untuk mencegah error pembagian dengan nol (ZeroDivisionError)
                 if total_api > 0:
-                    weight_one = float(total_aman / total_api / 8)
+                    weight_one = float(total_aman / total_api / 4)
                 else:
                     weight_one = 1.0 
                 
@@ -112,13 +113,15 @@ class TrainingWorker(QThread):
                 total_aman = total_pixel - total_api
                 
                 # 3. Hitung Alpha secara dinamis (Rasio piksel aman dari total piksel)
-                if total_pixel > 0:
-                    alpha_dinamis = float(total_aman / total_pixel)
-                else:
-                    alpha_dinamis = 0.25 # Standar awal
+                # if total_pixel > 0:
+                #     alpha_dinamis = float(total_aman / total_pixel)
+                # else:
+                #     alpha_dinamis = 0.25 # Standar awal
+
+                alpha_dinamis = float(input("Enter the alpha value for Focal Loss: ")) # Kita tetap pakai nilai alpha standar untuk focal loss karena sudah cukup baik untuk kasus imbalance ekstrem seperti ini
                 
                 # Gamma standar yang direkomendasikan adalah 2.0
-                gamma_val = 5.0
+                gamma_val = float(input("Enter the gamma value for Focal Loss: ")) # Kita tetap pakai nilai gamma standar untuk focal loss karena sudah cukup baik untuk kasus imbalance ekstrem seperti ini
                 
                 print(f"Focal Loss Dinamis: Alpha={alpha_dinamis:.4f}, Gamma={gamma_val}")
                 self.update_status.emit(f"Menerapkan Focal Loss: Alpha={alpha_dinamis:.4f}, Gamma={gamma_val}")
@@ -192,7 +195,9 @@ class TrainingWorker(QThread):
                             if not np.isnan(jarak):  # Hindari Error saat matriks api kosong
                                 jarak_total.append(jarak)
                                 
-            val_jarak = np.mean(jarak_total) if len(jarak_total) > 0 else 0.0
+            # val_jarak = np.mean(jarak_total) if len(jarak_total) > 0 else 0.0
+
+            val_jarak = np.median(jarak_total) if len(jarak_total) > 0 else 0.0
             
             # Tembakkan sinyalnya ke MainWindow!
             self.sinyal_evaluasi.emit(val_precision, val_recall, val_f1, val_auc, val_jarak)
@@ -244,7 +249,9 @@ class EvaluasiWorker(QThread):
                             if not np.isnan(jarak):
                                 jarak_total.append(jarak)
                                 
-            val_jarak = np.mean(jarak_total) if len(jarak_total) > 0 else 0.0
+            # val_jarak = np.mean(jarak_total) if len(jarak_total) > 0 else 0.0
+
+            val_jarak = np.median(jarak_total) if len(jarak_total) > 0 else 0.0
             
             self.sinyal_hasil.emit(skor[2], skor[3], skor[4], skor[5], val_jarak)
             self.sinyal_status.emit("Evaluasi Selesai!")

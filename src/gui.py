@@ -304,7 +304,7 @@ class MainWindow(QMainWindow):
         
         grid_training.addWidget(QLabel("Loss Function:"), 1, 2)
         self.combo_loss = QComboBox()
-        self.combo_loss.addItems(["Weighted Binary Crossentropy", "Focal Loss", "Binary Crossentropy", "MSE"])
+        self.combo_loss.addItems(["Focal Loss", "Weighted Binary Crossentropy", "Binary Crossentropy", "MSE"])
         grid_training.addWidget(self.combo_loss, 1, 3)
         
         group_training.setLayout(grid_training)
@@ -320,7 +320,8 @@ class MainWindow(QMainWindow):
         form_eval.addRow("ROC-AUC:", self.label_val_auc)
 
         self.spin_eval_threshold = QDoubleSpinBox()
-        self.spin_eval_threshold.setRange(0.01, 0.99)
+        self.spin_eval_threshold.setDecimals(6)
+        self.spin_eval_threshold.setRange(0.000001, 0.999999)
         self.spin_eval_threshold.setSingleStep(0.05)
         self.spin_eval_threshold.setValue(0.50)
         self.spin_eval_threshold.setToolTip("The probability threshold for recognizing a hot spot during evaluation. Adjusting this can affect precision and recall metrics.")
@@ -416,10 +417,10 @@ class MainWindow(QMainWindow):
         self.form_prediksi = QFormLayout()
 
         self.slider_threshold = QDoubleSpinBox()
-        self.slider_threshold.setRange(0.01, 0.99)
+        self.slider_threshold.setDecimals(6)
+        self.slider_threshold.setRange(0.000001, 0.999999)
         self.slider_threshold.setSingleStep(0.01)
-        self.slider_threshold.setValue(0.30)
-        self.slider_threshold.setDecimals(2)
+        self.slider_threshold.setValue(0.50)
         self.slider_threshold.valueChanged.connect(lambda: self.update_peta_prediksi(self.slider_hari.value()))
 
         self.form_prediksi.addRow("Confidence Threshold:", self.slider_threshold)
@@ -1034,8 +1035,48 @@ class MainWindow(QMainWindow):
             return
             
         if not hasattr(self, 'val_gen') or self.val_gen is None:
-            QMessageBox.warning(self, "Error", "Data validasi tidak tersedia! Pastikan dataset cukup untuk split train/val.")
-            return
+            extent = self.extent_suhu 
+
+            hujan, suhu, kelem, hotspot = siapkan_data_mentah(
+                self.data_hujan, self.data_suhu, self.data_kelembapan, 
+                self.df_hotspot, self.waktu_kordinat, extent
+            )
+
+            data_stack = np.stack([hujan, suhu, kelem], axis=-1)
+            original_shape = data_stack.shape
+            
+            # Flatten data agar bisa masuk ke MinMaxScaler (Samples, Features)
+            data_flat = data_stack.reshape(-1, 3)
+            
+            data_scaled_flat = self.scaler.fit_transform(data_flat)
+            
+            # Kembalikan ke bentuk (Total_Hari, H, W, 3)
+            data_scaled = data_scaled_flat.reshape(original_shape)
+            
+            # Pisahkan kembali ke variabel masing-masing
+            hujan = data_scaled[..., 0]
+            suhu = data_scaled[..., 1]
+            kelem = data_scaled[..., 2]
+
+            model = self.model_convlstm
+
+            # 1. Mendapatkan Time Steps (Panjang sekuens input)
+            # input_shape memiliki format: (Batch_Size, Time_Steps, Height, Width, Channels)
+            time_steps = model.input_shape[1] 
+
+            # 2. Mendapatkan Horizon (Panjang sekuens output)
+            # output_shape memiliki format: (Batch_Size, Horizon, Height, Width, Channels)
+            horizon = model.output_shape[1]
+
+            batch_size = self.spin_batch.value()
+            total_hari = len(hujan)
+            split_idx = int(total_hari * 0.8)
+            hujan_val, suhu_val, kelem_val, hotspot_val = hujan[split_idx:], suhu[split_idx:], kelem[split_idx:], hotspot[split_idx:]
+
+            self.val_gen = FireDataGenerator(hujan_val, suhu_val, kelem_val, hotspot_val, time_steps, horizon, batch_size, shuffle=False)
+            
+            # QMessageBox.warning(self, "Error", "Data validasi tidak tersedia! Pastikan dataset cukup untuk split train/val.")
+            # return
 
         # Ambil threshold baru
         threshold_baru = self.spin_eval_threshold.value()
