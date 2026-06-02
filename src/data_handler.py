@@ -59,10 +59,6 @@ def siapkan_data_mentah(data_hujan, data_suhu, data_kelem, df_hotspot, waktu_kor
     """
     Hanya merapikan data menjadi 3D (Hari, Lat, Lon), TIDAK membuat Tensor 5D.
     """
-    # 1. Bersihkan NaN
-    # hujan_bersih = np.nan_to_num(data_hujan, nan=0.0)
-    # suhu_bersih = np.nan_to_num(data_suhu, nan=0.0)
-    # kelem_bersih = np.nan_to_num(data_kelem, nan=0.0)
 
     # Curah hujan: Ubah NaN jadi nilai maksimal pada keseluruhan data hujan
     max_hujan = np.nanmax(data_hujan) if np.any(~np.isnan(data_hujan)) else 0.0
@@ -82,20 +78,29 @@ def siapkan_data_mentah(data_hujan, data_suhu, data_kelem, df_hotspot, waktu_kor
     kelem_bersih = kelem_bersih[:min_hari]
     waktu_kordinat = waktu_kordinat[:min_hari]
 
-    # 3. Samakan Ukuran Spasial (Resize ke ukuran Hujan/CHIRPS)
-    # Kita pakai fungsi zoom dari scipy
-    tinggi_target, lebar_target = hujan_bersih.shape[1], hujan_bersih.shape[2]
+    # 3. Samakan Ukuran Spasial (Resize ke ukuran resolusi tertinggi)
+    # Ambil dimensi masing-masing array
+    tinggi_hujan, lebar_hujan = hujan_bersih.shape[1], hujan_bersih.shape[2]
+    tinggi_suhu, lebar_suhu = suhu_bersih.shape[1], suhu_bersih.shape[2]
+    tinggi_kelem, lebar_kelem = kelem_bersih.shape[1], kelem_bersih.shape[2]
+
+    # Cari dimensi paling tinggi (resolusi paling bagus) dari ketiga data tersebut
+    tinggi_target = max(tinggi_hujan, tinggi_suhu, tinggi_kelem)
+    lebar_target = max(lebar_hujan, lebar_suhu, lebar_kelem)
     
     def resize_array_3d(arr):
-        if arr.shape[1:] == (tinggi_target, lebar_target): return arr
+        # Jika ukurannya sudah sama dengan resolusi tertinggi, jangan lakukan apa-apa
+        if arr.shape[1:] == (tinggi_target, lebar_target): 
+            return arr
         fy = tinggi_target / arr.shape[1]
         fx = lebar_target / arr.shape[2]
         return zoom(arr, (1.0, fy, fx), order=1)
 
-    if suhu_bersih.shape != hujan_bersih.shape:
-        suhu_bersih = resize_array_3d(suhu_bersih)
-    if kelem_bersih.shape != hujan_bersih.shape:
-        kelem_bersih = resize_array_3d(kelem_bersih)
+    # Terapkan fungsi resize ke semua variabel 
+    # (Hanya data dengan resolusi lebih rendah yang akan mengalami up-scaling)
+    hujan_bersih = resize_array_3d(hujan_bersih)
+    suhu_bersih = resize_array_3d(suhu_bersih)
+    kelem_bersih = resize_array_3d(kelem_bersih)
 
     # 4. Rasterisasi Hotspot (Ubah CSV jadi Peta 0/1)
     Y_hotspot = np.zeros((min_hari, tinggi_target, lebar_target)) # Hemat memori, 3D dulu

@@ -16,7 +16,7 @@ class TrainingWorker(QThread):
     sinyal_evaluasi = Signal(float, float, float, float, float)
 
     # Tambahkan parameter X_data dan Y_data
-    def __init__(self, epochs, batch_size, train_gen, val_gen, layers, filters, dropout, optimizer, loss_func, eval_threshold):
+    def __init__(self, epochs, batch_size, train_gen, val_gen, layers, filters, dropout, optimizer, loss_func, eval_threshold, w0=1.0, w1=1.0, alpha=0.25, gamma=2.0):
         super().__init__()
         self.epochs = epochs
         self.batch_size = batch_size
@@ -31,26 +31,29 @@ class TrainingWorker(QThread):
         self.optimizer_name = optimizer
         self.loss_name = loss_func
 
+        # Simpan Hyperparameter Loss
+        self.w0 = w0
+        self.w1 = w1
+        self.focal_alpha = alpha
+        self.focal_gamma = gamma
+
         self.horizon = getattr(self.train_gen, 'horizon', 1)
         self.time_steps = getattr(self.train_gen, 'time_steps', 7)
 
     def run(self):
         try:
+            print(2)
             X_sample, Y_sample = self.train_gen[0]
             _, time_steps, tinggi, lebar, channels = X_sample.shape
             
-            self.update_status.emit(f"Membangun Model: {self.num_layers} Layer, {self.filters} Filters...")
+            self.update_status.emit(f"Building Model: {self.num_layers} Layer, {self.filters} Filters...")
             
             model = Sequential()
             
-            # ==========================================
-            # PEMBENTUKAN LAYER DINAMIS BERDASARKAN INPUT
-            # ==========================================
             if self.horizon > self.time_steps:
-                raise ValueError(f"Horizon ({self.horizon}) tidak boleh lebih besar dari time_steps ({time_steps})")
+                raise ValueError(f"Horizon ({self.horizon}) cannot be greater than time_steps ({time_steps})")
 
             for i in range(self.num_layers):
-                # 🌟 PERUBAHAN 1: Semua ConvLSTM HARUS return_sequences=True
                 ret_seq = True 
                 
                 # Layer pertama butuh input_shape
@@ -71,67 +74,13 @@ class TrainingWorker(QThread):
                 if self.dropout_rate > 0:
                     model.add(Dropout(self.dropout_rate))
             
-            # 🌟 PERUBAHAN 3: Layer Output dengan TimeDistributed
             # Conv2D memproses setiap hari secara independen namun tetap dalam bentuk sequence
             model.add(TimeDistributed(Conv2D(filters=1, kernel_size=(1, 1), activation='sigmoid', padding='same', bias_initializer=Constant(-4.5))))
             
-            # ==========================================
-            # PILIH FUNGSI LOSS BERDASARKAN COMBOBOX
-            # ==========================================
             if self.loss_name == "Weighted Binary Crossentropy":
-                # 1. Ambil matriks data target (hotspot) dari generator
-                y_train_data = self.train_gen.hotspot
-                
-                # 2. Hitung jumlah pixel untuk masing-masing kelas
-                total_api = np.sum(y_train_data)
-                total_pixel = y_train_data.size
-                total_aman = total_pixel - total_api
-                
-                # 3. Tetapkan bobot
-                weight_zero = 1.0
-                
-                # Bobot kelas api adalah rasio kelas negatif (aman) dibagi positif (api)
-                # Diberi kondisi if untuk mencegah error pembagian dengan nol (ZeroDivisionError)
-                if total_api > 0:
-                    weight_one = float(total_aman / total_api / 4)
-                else:
-                    weight_one = 1.0 
-                
-                print(f"Bobot Dinamis: Aman={weight_zero}, Api={weight_one:.2f}")
-                    
-                # Kirim informasi bobot dinamis ini agar tampil di antarmuka GUI (Opsional)
-                self.update_status.emit(f"Menerapkan bobot dinamis: Aman={weight_zero}, Api={weight_one:.2f}")
-                
-                loss_dipakai = weighted_binary_crossentropy(weight_zero, weight_one)
+                loss_dipakai = weighted_binary_crossentropy(self.w0, self.w1)
             elif self.loss_name == "Focal Loss":
-                # 1. Ambil matriks data target (hotspot) dari generator
-                y_train_data = self.train_gen.hotspot
-                
-                # 2. Hitung jumlah pixel untuk rasio
-                total_api = np.sum(y_train_data)
-                total_pixel = y_train_data.size
-                total_aman = total_pixel - total_api
-                
-                # 3. Hitung Alpha secara dinamis (Rasio piksel aman dari total piksel)
-                # if total_pixel > 0:
-                #     alpha_dinamis = float(total_aman / total_pixel)
-                # else:
-                #     alpha_dinamis = 0.25 # Standar awal
-
-                alpha_dinamis = float(input("Enter the alpha value for Focal Loss: ")) # Kita tetap pakai nilai alpha standar untuk focal loss karena sudah cukup baik untuk kasus imbalance ekstrem seperti ini
-                
-                # Gamma standar yang direkomendasikan adalah 2.0
-                gamma_val = float(input("Enter the gamma value for Focal Loss: ")) # Kita tetap pakai nilai gamma standar untuk focal loss karena sudah cukup baik untuk kasus imbalance ekstrem seperti ini
-                
-                print(f"Focal Loss Dinamis: Alpha={alpha_dinamis:.4f}, Gamma={gamma_val}")
-                self.update_status.emit(f"Menerapkan Focal Loss: Alpha={alpha_dinamis:.4f}, Gamma={gamma_val}")
-                
-                loss_dipakai = focal_loss(alpha=alpha_dinamis, gamma=gamma_val)
-
-            elif self.loss_name == "MSE":
-                loss_dipakai = 'mse'
-            else:
-                loss_dipakai = 'binary_crossentropy'
+                loss_dipakai = focal_loss(alpha=self.focal_alpha, gamma=self.focal_gamma)
                 
             model.compile(optimizer=self.optimizer_name, loss=loss_dipakai, metrics=['accuracy'])
             
@@ -159,10 +108,7 @@ class TrainingWorker(QThread):
             # 6. SIMPAN MODEL KE DALAM VARIABEL WORKER (BUKAN KE HARD DISK)
             self.model_hasil = model
 
-            # ==========================================
-            # EVALUASI OTOMATIS PADA DATA VALIDASI
-            # ==========================================
-            self.update_status.emit("Melakukan Evaluasi Akhir pada Data Validasi...")
+            self.update_status.emit("Evaluate Model on Validation Data...")
 
             f_prec, f_rec, f_f1, f_auc = buat_metrik_spasial(self.eval_threshold)
             model.compile(optimizer='adam', loss='mse', metrics=[f_prec, f_rec, f_f1, f_auc])
@@ -171,7 +117,6 @@ class TrainingWorker(QThread):
             skor_evaluasi = model.evaluate(self.val_gen, verbose=0)
             
             # Urutan output dari evaluate() mengikuti urutan saat kita melakukan model.compile()
-            # Yaitu: [loss, precision, recall, f1_metric]
             val_precision = skor_evaluasi[1]
             val_recall = skor_evaluasi[2]
             val_f1 = skor_evaluasi[3]
@@ -195,20 +140,17 @@ class TrainingWorker(QThread):
                             if not np.isnan(jarak):  # Hindari Error saat matriks api kosong
                                 jarak_total.append(jarak)
                                 
-            # val_jarak = np.mean(jarak_total) if len(jarak_total) > 0 else 0.0
+            val_jarak = np.mean(jarak_total) if len(jarak_total) > 0 else 0.0
 
-            val_jarak = np.median(jarak_total) if len(jarak_total) > 0 else 0.0
-            
             # Tembakkan sinyalnya ke MainWindow!
             self.sinyal_evaluasi.emit(val_precision, val_recall, val_f1, val_auc, val_jarak)
             
-            self.update_status.emit("Training dan Evaluasi Selesai!")
+            self.update_status.emit("Training and evaluation done")
             
-            self.update_status.emit("✅ Pelatihan Selesai! Model tersimpan di memori RAM.")
             self.training_finished.emit()
             
         except Exception as e:
-            self.update_status.emit(f"❌ Error saat training: {str(e)}")
+            self.update_status.emit(f"Error Training: {str(e)}")
             self.training_finished.emit()
 
 class EvaluasiWorker(QThread):
@@ -224,12 +166,10 @@ class EvaluasiWorker(QThread):
         
     def run(self):
         try:
-            # 🌟 HAPUS baris load_model dari .h5
-            self.sinyal_status.emit(f"Menghitung ulang dengan Threshold {self.threshold:.2f}...")
+            self.sinyal_status.emit(f"Evaluating with Threshold {self.threshold:.2f}...")
             
             f_precision, f_recall, f_f1, f_auc = buat_metrik_spasial(self.threshold)
             
-            # Langsung compile ulang model yang ada di RAM
             self.model.compile(optimizer='adam', loss='mse', metrics=['accuracy', f_precision, f_recall, f_f1, f_auc])
 
             skor = self.model.evaluate(self.val_gen, verbose=0)
@@ -249,15 +189,13 @@ class EvaluasiWorker(QThread):
                             if not np.isnan(jarak):
                                 jarak_total.append(jarak)
                                 
-            # val_jarak = np.mean(jarak_total) if len(jarak_total) > 0 else 0.0
+            val_jarak = np.mean(jarak_total) if len(jarak_total) > 0 else 0.0
 
-            val_jarak = np.median(jarak_total) if len(jarak_total) > 0 else 0.0
-            
             self.sinyal_hasil.emit(skor[2], skor[3], skor[4], skor[5], val_jarak)
-            self.sinyal_status.emit("Evaluasi Selesai!")
+            self.sinyal_status.emit("Evaluation Complete!")
             
         except Exception as e:
-            self.sinyal_status.emit(f"Error Evaluasi: {str(e)}")
+            self.sinyal_status.emit(f"Error during Evaluation: {str(e)}")
 
 class KerasWorkerCallback(Callback):
     # Tambahkan metrics_signal di sini
@@ -277,7 +215,7 @@ class KerasWorkerCallback(Callback):
         
         persentase = int(((epoch + 1) / self.total_epochs) * 100)
         self.progress_signal.emit(persentase)
-        self.status_signal.emit(f"Epoch {epoch + 1}/{self.total_epochs} Selesai | Loss: {loss:.4f}")
+        self.status_signal.emit(f"Epoch {epoch + 1}/{self.total_epochs} Complete | Loss: {loss:.4f}")
         
         # PANCARKAN SINYAL GRAFIK KE GUI
         self.metrics_signal.emit(epoch + 1, loss, val_loss)

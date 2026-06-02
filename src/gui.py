@@ -53,7 +53,8 @@ class MainWindow(QMainWindow):
         self.data_kelembapan = None
         self.df_hotspot = None
         self.waktu_kordinat = None
-        # Variabel untuk menampung model ML di memori
+
+        # Variabel untuk menampung model ML 
         self.model_convlstm = None
         self.scaler = None
 
@@ -197,12 +198,12 @@ class MainWindow(QMainWindow):
                 
                 # Pasang kembali ikon yang sudah dihitamkan ke tombolnya
                 action.setIcon(QIcon(pixmap))
-        # -----------------------------------------------------
 
 
         plot_layout.addWidget(self.toolbar)
         plot_layout.addWidget(self.canvas)
-        # 2. Tambahkan Time Slider di Bawah Peta
+
+        # Tambahkan Time Slider di Bawah Peta
         slider_layout = QHBoxLayout()
         
         label_teks_waktu = QLabel("Slide Time:")
@@ -210,7 +211,6 @@ class MainWindow(QMainWindow):
         
         self.slider_waktu = QSlider(Qt.Horizontal)
         self.slider_waktu.setMinimum(0)             # Indeks awal (Hari ke-1)
-        #self.slider_waktu.setMaximum(TOTAL_HARI - 1) # Indeks akhir (Hari ke-30)
         self.slider_waktu.setValue(0)
         # Hubungkan aksi geser slider dengan fungsi update peta
         self.slider_waktu.valueChanged.connect(self.update_map)
@@ -227,9 +227,6 @@ class MainWindow(QMainWindow):
         
         tab1_layout.addLayout(top_control_layout)
         tab1_layout.addWidget(group_plot, stretch=1)
-
-        # Tampilkan peta awal saat aplikasi dibuka
-        self.update_map()
 
         # ==========================================
         # TAB 2: BUILD ML MODEL
@@ -261,12 +258,12 @@ class MainWindow(QMainWindow):
         grid_arsitektur.addWidget(QLabel("Filters (Neurons):"), 0, 2)
         self.spin_filters = QSpinBox()
         self.spin_filters.setRange(8, 128)
-        self.spin_filters.setSingleStep(8) # Naik turun kelipatan 8
+        self.spin_filters.setSingleStep(8) 
         self.spin_filters.setValue(16)
         grid_arsitektur.addWidget(self.spin_filters, 0, 3)
         
         grid_arsitektur.addWidget(QLabel("Dropout Rate:"), 1, 2)
-        self.spin_dropout = QDoubleSpinBox() # Untuk angka desimal
+        self.spin_dropout = QDoubleSpinBox()
         self.spin_dropout.setRange(0.0, 0.9)
         self.spin_dropout.setSingleStep(0.1)
         self.spin_dropout.setValue(0.2)
@@ -274,7 +271,7 @@ class MainWindow(QMainWindow):
 
         grid_arsitektur.addWidget(QLabel("Days To Predict:"), 2, 0)
         self.spin_horizon = QSpinBox()
-        self.spin_horizon.setRange(1, 7) # Misal: 1 sampai 7 hari
+        self.spin_horizon.setRange(1, 7) 
         self.spin_horizon.setValue(3)    # Default 3 hari
         grid_arsitektur.addWidget(self.spin_horizon, 2, 1)
         
@@ -304,8 +301,46 @@ class MainWindow(QMainWindow):
         
         grid_training.addWidget(QLabel("Loss Function:"), 1, 2)
         self.combo_loss = QComboBox()
-        self.combo_loss.addItems(["Focal Loss", "Weighted Binary Crossentropy", "Binary Crossentropy", "MSE"])
+        self.combo_loss.addItems(["Focal Loss", "Weighted Binary Crossentropy"])
         grid_training.addWidget(self.combo_loss, 1, 3)
+
+        # 1. Parameter Weighted Binary Crossentropy
+        self.label_w0 = QLabel("Weight 0 (Aman):")
+        self.spin_w0 = QDoubleSpinBox()
+        self.spin_w0.setRange(0.01, 10000.0)
+        self.spin_w0.setValue(1.0)
+        
+        self.label_w1 = QLabel("Weight 1 (Api):")
+        self.spin_w1 = QDoubleSpinBox()
+        self.spin_w1.setRange(0.01, 10000.0)
+        self.spin_w1.setValue(10.0)
+
+        # 2. Parameter Focal Loss
+        self.label_alpha = QLabel("Focal Alpha:")
+        self.spin_alpha = QDoubleSpinBox()
+        self.spin_alpha.setRange(0.01, 1.0)
+        self.spin_alpha.setValue(0.25)
+        self.spin_alpha.setSingleStep(0.05)
+        
+        self.label_gamma = QLabel("Focal Gamma:")
+        self.spin_gamma = QDoubleSpinBox()
+        self.spin_gamma.setRange(0.0, 5.0)
+        self.spin_gamma.setValue(2.0)
+        self.spin_gamma.setSingleStep(0.5)
+
+        # Tambahkan ke Layout (Ditumpuk di baris ke 2 dan 3)
+        grid_training.addWidget(self.label_w0, 2, 2)
+        grid_training.addWidget(self.spin_w0, 2, 3)
+        grid_training.addWidget(self.label_w1, 3, 2)
+        grid_training.addWidget(self.spin_w1, 3, 3)
+
+        grid_training.addWidget(self.label_alpha, 2, 2)
+        grid_training.addWidget(self.spin_alpha, 2, 3)
+        grid_training.addWidget(self.label_gamma, 3, 2)
+        grid_training.addWidget(self.spin_gamma, 3, 3)
+
+        # Fungsi untuk menampilkan/menyembunyikan input berdasarkan ComboBox
+        self.combo_loss.currentTextChanged.connect(self.update_loss_params_ui)
         
         group_training.setLayout(grid_training)
         panel_kiri_ml.addWidget(group_training)
@@ -368,6 +403,11 @@ class MainWindow(QMainWindow):
         panel_kiri_ml.addWidget(self.btn_train)
         panel_kiri_ml.addWidget(self.btn_simpan_model)
         panel_kiri_ml.addWidget(self.progress_bar)
+
+        self.label_status_ml = QLabel("Status: Ready")
+        self.label_status_ml.setStyleSheet("font-weight: bold; color: #2c3e50; margin-top: 5px; margin-bottom: 2px;")
+        panel_kiri_ml.addWidget(self.label_status_ml)
+
         panel_kiri_ml.addStretch()
         
         # --- PANEL KANAN: GRAFIK REAL-TIME ---
@@ -504,6 +544,10 @@ class MainWindow(QMainWindow):
         # Gabungkan
         layout_fire.addLayout(panel_kiri_fire, stretch=1)
         layout_fire.addWidget(group_peta_fire, stretch=3)
+
+        self.update_loss_params_ui(self.combo_loss.currentText())
+        self.update_map()
+
 
     def ganti_region(self):
         """Mereset data jika pengguna mengganti pulau agar matriks tidak bentrok"""
@@ -854,6 +898,40 @@ class MainWindow(QMainWindow):
         self.canvas.fig.tight_layout()
         self.canvas.draw()
 
+    def update_loss_params_ui(self, nama_loss):
+        """Memunculkan input pengaturan bobot sesuai dengan Fungsi Loss yang dipilih"""
+        if nama_loss == "Weighted Binary Crossentropy":
+            self.label_w0.setVisible(True)
+            self.spin_w0.setVisible(True)
+            self.label_w1.setVisible(True)
+            self.spin_w1.setVisible(True)
+            
+            self.label_alpha.setVisible(False)
+            self.spin_alpha.setVisible(False)
+            self.label_gamma.setVisible(False)
+            self.spin_gamma.setVisible(False)
+            
+        elif nama_loss == "Focal Loss":
+            self.label_w0.setVisible(False)
+            self.spin_w0.setVisible(False)
+            self.label_w1.setVisible(False)
+            self.spin_w1.setVisible(False)
+            
+            self.label_alpha.setVisible(True)
+            self.spin_alpha.setVisible(True)
+            self.label_gamma.setVisible(True)
+            self.spin_gamma.setVisible(True)
+            
+        else: # Untuk MSE dan Binary Crossentropy
+            self.label_w0.setVisible(False)
+            self.spin_w0.setVisible(False)
+            self.label_w1.setVisible(False)
+            self.spin_w1.setVisible(False)
+            self.label_alpha.setVisible(False)
+            self.spin_alpha.setVisible(False)
+            self.label_gamma.setVisible(False)
+            self.spin_gamma.setVisible(False)
+
     def mulai_training(self):
         """Fungsi yang dipanggil saat tombol Mulai ditekan"""
         
@@ -897,7 +975,6 @@ class MainWindow(QMainWindow):
         try:
             extent = self.extent_suhu 
             
-            # 1. SIAPKAN DATA MENTAH (BAHAN BAKU)
             # 1. SIAPKAN DATA MENTAH (BAHAN BAKU)
             hujan, suhu, kelem, hotspot = siapkan_data_mentah(
                 self.data_hujan, self.data_suhu, self.data_kelembapan, 
@@ -947,15 +1024,21 @@ class MainWindow(QMainWindow):
             # Ambil nilai threshold evaluasi dari UI
             eval_threshold = self.spin_eval_threshold.value()
 
+            w0 = self.spin_w0.value()
+            w1 = self.spin_w1.value()
+            focal_alpha = self.spin_alpha.value()
+            focal_gamma = self.spin_gamma.value()
+
             # 3. JALANKAN WORKER
             self.worker = TrainingWorker(
                 epochs, batch_size, train_gen, self.val_gen,
-                layers, filters, dropout, optimizer, loss_func,  # <-- Kirim param baru
-                eval_threshold  # <-- Kirim nilai threshold evaluasi
+                layers, filters, dropout, optimizer, loss_func,
+                eval_threshold,
+                w0, w1, focal_alpha, focal_gamma  
             )
             
             self.worker.update_progress.connect(self.progress_bar.setValue)
-            #self.worker.update_status.connect(self.label_status_ml.setText)
+            self.worker.update_status.connect(self.label_status_ml.setText)
             self.worker.update_metrics.connect(self.update_grafik_training)
             self.worker.training_finished.connect(self.selesai_training)
             self.worker.sinyal_evaluasi.connect(self.tampilkan_hasil_evaluasi)
@@ -1028,10 +1111,9 @@ class MainWindow(QMainWindow):
                 self.btn_simpan_model.setEnabled(True)
     
     def jalankan_evaluasi_cepat(self):
-        # Cek apakah model sudah pernah dilatih dan disimpan
-        # 🌟 UBAH CEK FILE MENJADI CEK VARIABEL RAM
+        # Cek apakah model sudah pernah dilatih dan disimpan di memori
         if self.model_convlstm is None:
-            QMessageBox.warning(self, "Error", "Model belum dilatih! Latih dulu di tab Build ML Model.")
+            QMessageBox.warning(self, "Error", "No trained model found! Please train a model first before evaluation.")
             return
             
         if not hasattr(self, 'val_gen') or self.val_gen is None:
@@ -1083,17 +1165,14 @@ class MainWindow(QMainWindow):
         
         # Ubah UI sementara
         self.btn_re_eval.setEnabled(False)
-        # self.label_status_ml.setText("Memulai proses evaluasi ulang...")
-        # self.label_val_precision.setText("Menghitung...")
-        # self.label_val_recall.setText("Menghitung...")
-        # self.label_val_f1.setText("Menghitung...")
+        self.label_status_ml.setText("Evaluating...")
         
         # Jalankan worker
         self.eval_worker = EvaluasiWorker(self.model_convlstm, self.val_gen, threshold_baru)
         
         # Hubungkan sinyal ke fungsi yang sudah ada
         self.eval_worker.sinyal_hasil.connect(self.tampilkan_hasil_evaluasi)
-        # self.eval_worker.sinyal_status.connect(self.label_status_ml.setText)
+        self.eval_worker.sinyal_status.connect(self.label_status_ml.setText)
         
         # Kembalikan tombol jika sudah selesai
         self.eval_worker.finished.connect(lambda: self.btn_re_eval.setEnabled(True))
@@ -1111,9 +1190,7 @@ class MainWindow(QMainWindow):
 
     def selesai_training(self):
         self.btn_train.setEnabled(True)
-        self.btn_train.setText("Start Training")
-        self.btn_train.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; font-size: 14px; padding: 15px; border-radius: 5px;")
-        
+
         # --- TAMBAHKAN KODE INI ---
         # Tangkap model dari worker jika pelatihannya berhasil (tidak error)
         if hasattr(self, 'worker') and hasattr(self.worker, 'model_hasil'):
@@ -1289,8 +1366,6 @@ class MainWindow(QMainWindow):
     
     def tangani_hasil_prediksi(self, hasil_array):
         """Dipanggil saat Worker Prediksi selesai bekerja"""
-        # hasil_array sekarang berbentuk (1, 3, H, W, 1)
-        # Kita buang dimensi batch agar menjadi (3, H, W, 1)
         self.hasil_prediksi_sementara = hasil_array[0] 
         
         # Nyalakan slider
