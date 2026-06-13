@@ -15,7 +15,6 @@ class TrainingWorker(QThread):
 
     sinyal_evaluasi = Signal(float, float, float, float, float)
 
-    # Tambahkan parameter X_data dan Y_data
     def __init__(self, epochs, batch_size, train_gen, val_gen, layers, filters, dropout, optimizer, loss_func, eval_threshold, w0=1.0, w1=1.0, alpha=0.25, gamma=2.0):
         super().__init__()
         self.epochs = epochs
@@ -24,14 +23,12 @@ class TrainingWorker(QThread):
         self.val_gen = val_gen
         self.eval_threshold = eval_threshold
         
-        # Simpan Hyperparameter
         self.num_layers = layers
         self.filters = filters
         self.dropout_rate = dropout
         self.optimizer_name = optimizer
         self.loss_name = loss_func
 
-        # Simpan Hyperparameter Loss
         self.w0 = w0
         self.w1 = w1
         self.focal_alpha = alpha
@@ -56,7 +53,6 @@ class TrainingWorker(QThread):
             for i in range(self.num_layers):
                 ret_seq = True 
                 
-                # Layer pertama butuh input_shape
                 if i == 0:
                     model.add(ConvLSTM2D(filters=self.filters, kernel_size=(3, 3), padding='same', 
                                         return_sequences=ret_seq, activation='relu', 
@@ -70,11 +66,9 @@ class TrainingWorker(QThread):
                 
                 model.add(BatchNormalization())
                 
-                # Tambahkan Dropout jika nilainya > 0
                 if self.dropout_rate > 0:
                     model.add(Dropout(self.dropout_rate))
             
-            # Conv2D memproses setiap hari secara independen namun tetap dalam bentuk sequence
             model.add(TimeDistributed(Conv2D(filters=1, kernel_size=(1, 1), activation='sigmoid', padding='same', bias_initializer=Constant(-4.5))))
             
             if self.loss_name == "Weighted Binary Crossentropy":
@@ -84,10 +78,8 @@ class TrainingWorker(QThread):
                 
             model.compile(optimizer=self.optimizer_name, loss=loss_dipakai, metrics=['accuracy'])
             
-            # 4. SAMBUNGKAN CALLBACK KE GUI
             gui_callback = KerasWorkerCallback(self.update_progress, self.update_status, self.update_metrics, self.epochs)
         
-            # JIKA DATA VALIDASI TERSEDIA
             if self.val_gen is not None:
                 model.fit(
                     self.train_gen,            
@@ -96,7 +88,6 @@ class TrainingWorker(QThread):
                     callbacks=[gui_callback],
                     verbose=0
                 )
-            # JIKA DATANYA SEDIKIT DAN HANYA ADA TRAIN GEN
             else:
                 model.fit(
                     self.train_gen,            
@@ -105,7 +96,6 @@ class TrainingWorker(QThread):
                     verbose=0
                 )
             
-            # 6. SIMPAN MODEL KE DALAM VARIABEL WORKER (BUKAN KE HARD DISK)
             self.model_hasil = model
 
             self.update_status.emit("Evaluate Model on Validation Data...")
@@ -113,10 +103,8 @@ class TrainingWorker(QThread):
             f_prec, f_rec, f_f1, f_auc = buat_metrik_spasial(self.eval_threshold)
             model.compile(optimizer='adam', loss='mse', metrics=[f_prec, f_rec, f_f1, f_auc])
             
-            # Perintah ini akan menguji model pada data yang tidak dipakai belajar (val_gen)
             skor_evaluasi = model.evaluate(self.val_gen, verbose=0)
             
-            # Urutan output dari evaluate() mengikuti urutan saat kita melakukan model.compile()
             val_precision = skor_evaluasi[1]
             val_recall = skor_evaluasi[2]
             val_f1 = skor_evaluasi[3]
@@ -125,24 +113,20 @@ class TrainingWorker(QThread):
             jarak_total = []
             
             if self.val_gen is not None:
-                # Iterasi seluruh batch
                 for i in range(len(self.val_gen)):
                     X_batch, y_batch = self.val_gen[i]
                     y_pred_batch = model.predict(X_batch, verbose=0)
                     
-                    # Terapkan threshold 
                     y_pred_biner = (y_pred_batch > self.eval_threshold).astype(int)
                     
-                    # Iterasi setiap sampel gambar 2D dari dimensi (Batch, Horizon, H, W, Channel)
                     for b in range(y_batch.shape[0]):
                         for t in range(y_batch.shape[1]):
                             jarak = hitung_jarak_meleset_piksel(y_batch[b, t, :, :, 0], y_pred_biner[b, t, :, :, 0])
-                            if not np.isnan(jarak):  # Hindari Error saat matriks api kosong
+                            if not np.isnan(jarak): 
                                 jarak_total.append(jarak)
                                 
             val_jarak = np.mean(jarak_total) if len(jarak_total) > 0 else 0.0
 
-            # Tembakkan sinyalnya ke MainWindow!
             self.sinyal_evaluasi.emit(val_precision, val_recall, val_f1, val_auc, val_jarak)
             
             self.update_status.emit("Training and evaluation done")
@@ -157,7 +141,6 @@ class EvaluasiWorker(QThread):
     sinyal_hasil = Signal(float, float, float, float, float)
     sinyal_status = Signal(str)
     
-    # 🌟 UBAH path_model MENJADI model_obj
     def __init__(self, model_obj, val_gen, threshold):
         super().__init__()
         self.model = model_obj
@@ -198,7 +181,6 @@ class EvaluasiWorker(QThread):
             self.sinyal_status.emit(f"Error during Evaluation: {str(e)}")
 
 class KerasWorkerCallback(Callback):
-    # Tambahkan metrics_signal di sini
     def __init__(self, progress_signal, status_signal, metrics_signal, total_epochs):
         super().__init__()
         self.progress_signal = progress_signal
@@ -210,12 +192,10 @@ class KerasWorkerCallback(Callback):
         logs = logs or {}
         loss = logs.get('loss', 0.0)
         
-        # Ambil val_loss jika ada (jika tidak ada kembalikan 0)
         val_loss = logs.get('val_loss', 0.0)
         
         persentase = int(((epoch + 1) / self.total_epochs) * 100)
         self.progress_signal.emit(persentase)
         self.status_signal.emit(f"Epoch {epoch + 1}/{self.total_epochs} Complete | Loss: {loss:.4f}")
         
-        # PANCARKAN SINYAL GRAFIK KE GUI
         self.metrics_signal.emit(epoch + 1, loss, val_loss)
